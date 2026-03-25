@@ -1,13 +1,19 @@
 <script setup lang="ts">
 import { Button, Modal } from 'ant-design-vue'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 
 import { Icon as RpaIcon } from '../../../../Icon'
 import type { AuthType } from '../../../interface'
 
 import ConsultModal from './ConsultModal.vue'
+import ConsultUpgradeTrigger from './ConsultUpgradeTrigger.vue'
 
 const props = defineProps({
+  /** 仅挂载咨询弹窗，由外部通过 ref.openModal() 打开（与触发器 UI 解耦） */
+  modalOnly: {
+    type: Boolean,
+    default: false,
+  },
   authType: {
     type: String as () => AuthType,
     default: 'uap',
@@ -49,21 +55,24 @@ const props = defineProps({
   },
 })
 
-const tenantTypeMap = {
-  personal: '个人免费版',
-  professional: '专业版',
-  enterprise: '企业版',
-}
-
 const confData = ref(props)
+
+watch(
+  () => props,
+  (p) => {
+    if (p.modalOnly)
+      confData.value = { ...p }
+  },
+  { deep: true },
+)
 const consultModalRef = ref<InstanceType<typeof ConsultModal> | null>(null)
 function openModal() {
   if (confData.value.authType !== 'casdoor')
     consultModalRef.value?.showModal()
 }
 
-function init(config: typeof props) {
-  confData.value = config
+function init(config: Omit<typeof props, 'modalOnly'>) {
+  confData.value = { modalOnly: false, ...config } as typeof props
   if (confData.value.trigger === 'modal') {
     Modal.confirm({
       ...confData.value.modalConfirm!,
@@ -76,35 +85,22 @@ function init(config: typeof props) {
 
 defineExpose({
   init,
+  openModal,
 })
 </script>
 
 <template>
-  <div class="w-full" :class="confData?.customClass">
+  <template v-if="modalOnly">
+    <ConsultModal ref="consultModalRef" v-bind="confData?.consult" />
+  </template>
+  <div v-else class="w-full" :class="confData?.customClass">
     <template v-if="confData?.trigger === 'button'">
-      <div
+      <ConsultUpgradeTrigger
         v-if="confData?.buttonConf?.buttonType === 'tag'"
-        class="cursor-pointer flex items-center justify-start text-gradient-bg text-upgrader-bg !rounded-[12px] !w-full !text-[14px] hover:!opacity-90"
-      >
-        <div v-if="confData?.buttonConf?.currentEdition && confData?.buttonConf?.currentEdition !== 'personal'">
-          <div class="w-[fit-content] font-bold">
-            <span class="text-gradient">{{ tenantTypeMap[confData?.buttonConf?.currentEdition] }}</span>
-          </div>
-          <span v-if="confData?.buttonConf?.expirationDate" class="text-[12px] mt-[8px]">
-            到期时间： {{ confData?.buttonConf?.expirationDate }}
-            <span v-if="confData?.buttonConf?.shouldAlert" class="bg-[#ec483e] text-white px-[6px] py-[1px] !text-[12px] rounded-[3px]">即将到期</span>
-          </span>
-        </div>
-        <div v-else class="w-full text-left" :class="{ 'min-h-[38px] leading-[38px]': !confData?.buttonConf?.currentEdition }" @click="openModal">
-          <div v-if="confData?.buttonConf?.currentEdition" class="w-[fit-content] font-bold">
-            <span class="text-gradient">{{ tenantTypeMap[confData?.buttonConf?.currentEdition] }}</span>
-          </div>
-          <div v-if="confData?.authType !== 'casdoor'" class="flex items-center justify-start" :class="confData?.buttonConf?.currentEdition ? 'text-[12px] mt-[2px]' : ''">
-            <RpaIcon class="w-[26px] h-[26px] mr-[8px]" :class="confData?.buttonConf?.currentEdition ? '!w-[20px] !h-[20px] !mr-[4px]' : ''" name="upgrade-icon" />
-            <span class="text-gradient">{{ confData?.buttonConf?.buttonTxt || '开通专业版/企业版' }}</span>
-          </div>
-        </div>
-      </div>
+        :auth-type="confData.authType"
+        :button-conf="confData.buttonConf"
+        @open="openModal"
+      />
       <span v-else-if="confData?.buttonConf?.buttonType === 'text'" @click="openModal">{{ confData?.buttonConf?.buttonTxt }}</span>
       <Button v-else type="primary" ghost block class="border !border-[#0000001A] dark:!border-[#FFFFFF29]" @click="openModal">
         <span class="!flex items-center justify-center text-[12px] text-[#000000D9] dark:text-[#FFFFFFD9]">
