@@ -1,10 +1,15 @@
 <script setup lang="ts">
+import { NiceModal } from '@rpa/components'
 import { inject } from 'vue'
+
+import { PointsModal } from '@/components/PointsModal'
+import { useUserStore } from '@/stores/useUserStore'
 
 import PointsDropdown from './PointsDropdown.vue'
 import { OPEN_HEADER_UPGRADE_CONSULT_KEY } from './headerUpgradeConsult'
 import { TENANT_EDITION } from './tenantEdition'
 
+const userStore = useUserStore()
 const openHeaderUpgradeConsult = inject(OPEN_HEADER_UPGRADE_CONSULT_KEY, () => {})
 
 /** 与订阅/租户接口对齐后改为实际套餐 */
@@ -17,12 +22,24 @@ const isNegative = points < 0
 function handlePointsUpgrade() {
   openHeaderUpgradeConsult()
 }
+
+function handleUsageDetails() {
+  NiceModal.show(PointsModal, {
+    workspaceName: userStore.currentTenant?.name,
+  })
+}
 </script>
 
 <template>
   <a-dropdown placement="bottom">
     <template #overlay>
-      <PointsDropdown :plan-edition="planEdition" :points="points" :dialogue-count="badges" @upgrade="handlePointsUpgrade" />
+      <PointsDropdown
+        :plan-edition="planEdition"
+        :points="points"
+        :dialogue-count="badges"
+        @upgrade="handlePointsUpgrade"
+        @usage-details="handleUsageDetails"
+      />
     </template>
 
     <div class="inline-flex items-center gap-[2px] cursor-pointer">
