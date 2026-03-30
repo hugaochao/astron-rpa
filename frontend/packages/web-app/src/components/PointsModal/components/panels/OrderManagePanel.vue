@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { CalendarOutlined } from '@ant-design/icons-vue'
-import { useResizeObserver } from '@vueuse/core'
 import type { Dayjs } from 'dayjs'
-import dayjs from 'dayjs'
 import type { ColumnsType } from 'ant-design-vue/es/table'
 import { Table } from 'ant-design-vue'
-import { computed, h, ref } from 'vue'
+import { computed, h, ref, watch } from 'vue'
+
+import type { PaymentOrderRecord } from '@/api/points'
+import { getPaymentOrders } from '@/api/points'
 
 import InvoiceApplyModal from '../InvoiceApplyModal.vue'
 
@@ -20,50 +21,39 @@ interface OrderRow {
   action: OrderActionType
 }
 
-const MOCK_ORDERS: OrderRow[] = [
-  {
-    key: '1',
-    orderId: 'ORD20260308001',
-    amountYuan: 100,
-    points: 10_000,
-    purchasedAt: '2026-03-08 09:15',
-    action: 'apply',
-  },
-  {
-    key: '2',
-    orderId: 'ORD20260308001',
-    amountYuan: 100,
-    points: 10_000,
-    purchasedAt: '2026-03-08 09:15',
-    action: 'invoicing',
-  },
-  {
-    key: '3',
-    orderId: 'ORD20260308001',
-    amountYuan: 100,
-    points: 10_000,
-    purchasedAt: '2026-03-08 09:15',
-    action: 'applied_proxy',
-  },
-  {
-    key: '4',
-    orderId: 'ORD20260308001',
-    amountYuan: 100,
-    points: 10_000,
-    purchasedAt: '2026-03-08 09:15',
-    action: 'applied',
-  },
-  {
-    key: '5',
-    orderId: 'ORD20260308001',
-    amountYuan: 100,
-    points: 10_000,
-    purchasedAt: '2026-03-08 09:15',
-    action: 'apply',
-  },
-]
+function mapInvoiceToAction(inv: string): OrderActionType {
+  const s = inv.toLowerCase()
+  if (s.includes('proxy') || s === 'agency' || s === 'applied_proxy')
+    return 'applied_proxy'
+  if (s.includes('ing') || s === 'processing' || s === 'invoicing')
+    return 'invoicing'
+  if (s.includes('applied') || s === 'done' || s === 'success' || s === 'issued')
+    return 'applied'
+  return 'apply'
+}
+
+function mapOrderRecord(r: PaymentOrderRecord, index: number): OrderRow {
+  const biz = String(r.bizorderno ?? r.orderNo ?? `order-${index}`)
+  const amount = Number(r.amount ?? r.payAmount ?? r.totalAmount ?? 0)
+  const pts = Number(r.points ?? r.payPoints ?? 0)
+  const purchasedAt = String(r.payTime ?? r.gmtCreate ?? r.createTime ?? '')
+  const inv = String(r.invoiceStatus ?? r.invoiceApplyStatus ?? '')
+  return {
+    key: biz,
+    orderId: biz,
+    amountYuan: amount,
+    points: pts,
+    purchasedAt,
+    action: mapInvoiceToAction(inv),
+  }
+}
 
 const dateRange = ref<[Dayjs, Dayjs] | null>(null)
+const orders = ref<OrderRow[]>([])
+const orderTotal = ref(0)
+const orderPageNo = ref(1)
+const orderPageSize = ref(10)
+const orderLoading = ref(false)
 
 const ORDER_PICKER_POPUP_STYLE = { zIndex: 1200 } as const
 
@@ -72,51 +62,46 @@ function orderPickerGetPopupContainer(node: HTMLElement): HTMLElement {
   return wrap instanceof HTMLElement ? wrap : document.body
 }
 
-const filteredOrders = computed(() => {
-  let rows = MOCK_ORDERS
-  if (dateRange.value) {
-    const [start, end] = dateRange.value
-    const startMs = start.startOf('day').valueOf()
-    const endMs = end.endOf('day').valueOf()
-    rows = rows.filter((r) => {
-      const t = dayjs(r.purchasedAt, 'YYYY-MM-DD HH:mm').valueOf()
-      return t >= startMs && t <= endMs
-    })
+async function fetchOrders() {
+  orderLoading.value = true
+  try {
+    const params: {
+      pageNo: number
+      pageSize: number
+      startDate?: string
+      endDate?: string
+    } = { pageNo: orderPageNo.value, pageSize: orderPageSize.value }
+    if (dateRange.value) {
+      params.startDate = dateRange.value[0].format('YYYY-MM-DD')
+      params.endDate = dateRange.value[1].format('YYYY-MM-DD')
+    }
+    const data = await getPaymentOrders(params)
+    const records = data?.records ?? []
+    orders.value = records.map((r, i) => mapOrderRecord(r, i))
+    orderTotal.value = data?.total ?? records.length
   }
-  return rows
+  finally {
+    orderLoading.value = false
+  }
+}
+
+watch(dateRange, () => {
+  orderPageNo.value = 1
 })
 
-const ORDER_TABLE_ROW_PX = 48
-const ORDER_TABLE_HEAD_PX = 46
-
-const orderTableWrapRef = ref<HTMLElement | null>(null)
-const orderTableBodyMaxPx = ref(280)
-
-useResizeObserver(orderTableWrapRef, (entries) => {
-  const h = entries[0]?.contentRect.height ?? 0
-  const body = Math.floor(h - ORDER_TABLE_HEAD_PX)
-  if (body < 80)
-    return
-  orderTableBodyMaxPx.value = body
-})
-
-const orderTableScroll = computed(() => {
-  const n = filteredOrders.value.length
-  if (n === 0)
-    return undefined
-  const maxY = orderTableBodyMaxPx.value
-  if (n * ORDER_TABLE_ROW_PX <= maxY)
-    return undefined
-  return { y: maxY } as const
-})
+watch([dateRange, orderPageNo, orderPageSize], () => {
+  fetchOrders()
+}, { immediate: true })
 
 function formatAmount(yuan: number) {
   return `¥${yuan.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 const invoiceModalOpen = ref(false)
+const invoiceBizorderno = ref('')
 
-function openInvoiceModal() {
+function openInvoiceModal(record: OrderRow) {
+  invoiceBizorderno.value = record.orderId
   invoiceModalOpen.value = true
 }
 
@@ -129,7 +114,7 @@ function renderActionCell(record: OrderRow) {
         type: 'button',
         class:
           'border-0 bg-transparent p-0 text-sm font-semibold leading-[22.4px] text-[#726FFF] hover:opacity-80',
-        onClick: () => openInvoiceModal(),
+        onClick: () => openInvoiceModal(record),
       },
       '申请开票',
     )
@@ -207,10 +192,13 @@ const columns = computed<ColumnsType<OrderRow>>(() => [
     customRender: ({ record }) => renderActionCell(record),
   },
 ])
+
 </script>
 
 <template>
-  <div class="flex min-h-0 flex-1 flex-col gap-4 self-stretch overflow-hidden">
+  <div
+    class="flex min-h-0 min-w-0 flex-1 flex-col gap-4 self-stretch overflow-y-auto overscroll-contain"
+  >
     <!-- 说明 -->
     <div
       class="shrink-0 rounded-xl bg-[rgba(215,215,255,0.40)] px-3 py-3 dark:bg-[rgba(215,215,255,0.12)]"
@@ -220,9 +208,9 @@ const columns = computed<ColumnsType<OrderRow>>(() => [
       </p>
     </div>
 
-    <!-- 充值订单 -->
+    <!-- 充值订单：卡片最小高度 412px -->
     <div
-      class="flex min-h-0 min-w-0 flex-1 flex-col gap-4 self-stretch overflow-hidden rounded-2xl border border-solid border-[rgba(0,0,0,0.10)] bg-white px-6 pb-6 pt-6 dark:border-[rgba(255,255,255,0.14)] dark:bg-[#1a1a1a]"
+      class="order-manage-section flex min-w-0 flex-col gap-4 self-stretch overflow-hidden rounded-2xl border border-solid border-[rgba(0,0,0,0.10)] bg-white px-6 pb-6 pt-6 dark:border-[rgba(255,255,255,0.14)] dark:bg-[#1a1a1a]"
     >
       <div class="flex shrink-0 items-start justify-between gap-4 self-stretch">
         <span
@@ -244,23 +232,31 @@ const columns = computed<ColumnsType<OrderRow>>(() => [
         </a-range-picker>
       </div>
 
-      <div
-        ref="orderTableWrapRef"
-        class="order-table-wrap min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden rounded-xl"
-      >
-        <Table
-          row-key="key"
-          :columns="columns"
-          :data-source="filteredOrders"
-          :pagination="false"
-          :scroll="orderTableScroll"
+      <div class="order-table-wrap w-full min-w-0">
+        <a-spin :spinning="orderLoading" class="w-full">
+          <Table
+            row-key="key"
+            :columns="columns"
+            :data-source="orders"
+            :pagination="false"
+            size="small"
+            class="order-manage-table"
+          />
+        </a-spin>
+      </div>
+
+      <div v-if="orderTotal > 0" class="flex shrink-0 justify-end pt-1">
+        <a-pagination
+          v-model:current="orderPageNo"
+          v-model:page-size="orderPageSize"
+          :total="orderTotal"
+          :show-size-changer="true"
           size="small"
-          class="order-manage-table"
         />
       </div>
     </div>
 
-    <InvoiceApplyModal v-model:open="invoiceModalOpen" />
+    <InvoiceApplyModal v-model:open="invoiceModalOpen" :bizorderno="invoiceBizorderno" />
   </div>
 </template>
 
@@ -287,27 +283,23 @@ const columns = computed<ColumnsType<OrderRow>>(() => [
   }
 }
 
+.order-manage-section {
+  box-sizing: border-box;
+  min-height: 412px;
+}
+
 .order-table-wrap {
   display: flex;
   flex-direction: column;
 }
 
 .order-manage-table {
-  flex: 1;
-  min-height: 0;
-
-  &:deep(.ant-spin-nested-loading),
-  &:deep(.ant-spin-container),
-  &:deep(.ant-table-wrapper) {
-    height: 100%;
-  }
-
   &:deep(.ant-table) {
     background: transparent;
   }
 
   &:deep(.ant-table-container) {
-    border-radius: 12px;
+    border-radius: 8px;
     overflow: hidden;
     border: none;
   }

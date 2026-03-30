@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { message, Modal } from 'ant-design-vue'
-import { reactive, watch } from 'vue'
+import { reactive, ref, watch } from 'vue'
+
+import { postPointsOrderInvoice } from '@/api/points'
 
 defineOptions({ name: 'InvoiceApplyModal' })
 
 const props = defineProps<{
   open: boolean
+  /** 充值订单号 bizorderno */
+  bizorderno?: string
 }>()
 
 const emit = defineEmits<{
@@ -15,17 +19,18 @@ const emit = defineEmits<{
 const form = reactive({
   invoiceTitle: '',
   taxId: '',
-  invoiceType: 'normal',
+  invoiceType: '普通发票',
   email: '',
-  totalAmount: null as number | null,
 })
 
-const invoiceTypeOptions = [{ value: 'normal', label: '普通发票' }]
+const invoiceTypeOptions = [{ value: '普通发票', label: '普通发票' }]
 
 const emailRules = [
   { required: true, message: '请输入接受邮箱', trigger: 'blur' },
   { type: 'email' as const, message: '请输入有效邮箱', trigger: 'blur' },
 ]
+
+const submitting = ref(false)
 
 function selectGetPopupContainer(node: HTMLElement): HTMLElement {
   const wrap = node.closest('.ant-modal-wrap')
@@ -39,9 +44,8 @@ watch(
       return
     form.invoiceTitle = ''
     form.taxId = ''
-    form.invoiceType = 'normal'
+    form.invoiceType = '普通发票'
     form.email = ''
-    form.totalAmount = null
   },
 )
 
@@ -49,9 +53,26 @@ function close() {
   emit('update:open', false)
 }
 
-function onFinish() {
-  message.success('已提交申请（示例）')
-  close()
+async function onFinish() {
+  const no = props.bizorderno?.trim()
+  if (!no) {
+    message.error('缺少订单号')
+    return
+  }
+  submitting.value = true
+  try {
+    await postPointsOrderInvoice(no, {
+      invoiceTitle: form.invoiceTitle.trim(),
+      taxNumber: form.taxId.trim(),
+      invoiceType: form.invoiceType,
+      email: form.email.trim(),
+    })
+    message.success('已提交申请')
+    close()
+  }
+  finally {
+    submitting.value = false
+  }
 }
 </script>
 
@@ -147,40 +168,17 @@ function onFinish() {
               class="invoice-apply-input h-8 rounded-lg text-xs"
             />
           </a-form-item>
-
-          <a-form-item
-            name="totalAmount"
-            class="!mb-0"
-            :rules="[
-              { required: true, message: '请输入开票总金额', trigger: 'change' },
-              { type: 'number', min: 0, message: '金额需大于等于 0', trigger: 'change' },
-            ]"
-          >
-            <template #label>
-              <span class="text-xs font-medium leading-[22px] text-[rgba(0,0,0,0.45)]">开票总金额</span>
-              <span class="ml-1 text-sm font-semibold leading-[22px] text-[#FF4D4F]">*</span>
-            </template>
-            <a-input-number
-              v-model:value="form.totalAmount"
-              :min="0"
-              :precision="2"
-              :step="0.01"
-              :controls="false"
-              placeholder="请输入开票总金额"
-              :bordered="false"
-              class="invoice-apply-input-number h-8 w-full rounded-lg text-xs"
-            />
-          </a-form-item>
         </div>
 
         <div class="mt-6 flex justify-end gap-2 pb-1">
-          <a-button class="h-8 rounded-md px-4" @click="close">
+          <a-button class="h-8 rounded-md px-4" :disabled="submitting" @click="close">
             取消
           </a-button>
           <a-button
             type="primary"
             html-type="submit"
             class="h-8 rounded-lg border-[#726FFF] bg-[#726FFF] px-4 hover:!bg-[#5f5cff]"
+            :loading="submitting"
           >
             确认
           </a-button>
@@ -216,32 +214,6 @@ function onFinish() {
   }
 
   :deep(.ant-input::placeholder) {
-    color: rgba(0, 0, 0, 0.25) !important;
-  }
-}
-
-.invoice-apply-input-number {
-  width: 100%;
-  background: #f3f3f7 !important;
-
-  :deep(.ant-input-number) {
-    width: 100%;
-    background: #f3f3f7 !important;
-    border: none !important;
-    border-radius: 8px !important;
-    box-shadow: none !important;
-  }
-
-  :deep(.ant-input-number-input) {
-    height: 32px;
-    padding-top: 4px;
-    padding-bottom: 4px;
-    font-size: 12px !important;
-    color: rgba(0, 0, 0, 0.85) !important;
-    background: transparent !important;
-  }
-
-  :deep(.ant-input-number-input::placeholder) {
     color: rgba(0, 0, 0, 0.25) !important;
   }
 }

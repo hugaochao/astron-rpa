@@ -14,56 +14,17 @@ import dayjs from 'dayjs'
 import type { ColumnsType } from 'ant-design-vue/es/table'
 import { Table } from 'ant-design-vue'
 import { useResizeObserver } from '@vueuse/core'
-import { computed, h, ref } from 'vue'
+import { computed, h, nextTick, onMounted, ref, watch } from 'vue'
 import VChart from 'vue-echarts'
+
+import type { PointsConsumptionParams, PointsConsumptionRecord } from '@/api/points'
+import { getPointsConsumptions } from '@/api/points'
 
 use([CanvasRenderer, BarChart, PieChart, GridComponent, TooltipComponent, LegendComponent])
 
 type ChartScope = 'today' | 'month'
 
-/** 今日 24 小时示例数据，合计 186（与设计稿一致） */
-const TODAY_HOURLY: number[] = [
-  0, 0, 0, 0, 0, 0, 2, 5, 8, 12, 18, 25, 12, 25, 15, 22, 30, 8, 4, 0, 0, 0, 0, 0,
-]
-
-/** 本月按日示例（30 个点） */
-const MONTH_DAILY = Array.from({ length: 30 }, (_, i) =>
-  Math.max(3, Math.round(20 + 15 * Math.sin(i / 4) + (i % 7) * 8)),
-)
-
-/** 与设计稿一致的环形分段色（由深到浅） */
-const PIE_ITEMS = [
-  { name: 'AI大模型', value: 38, color: '#5D59FF' },
-  { name: '智能组件', value: 26, color: '#7A76F5' },
-  { name: 'OCR识别', value: 18, color: '#9B97FA' },
-  { name: '语音识别', value: 12, color: '#BEBCFD' },
-  { name: '其他', value: 6, color: '#E4E3FA' },
-] as const
-
-const PIE_TOTAL = PIE_ITEMS.reduce((s, p) => s + p.value, 0)
-
-function formatPieTooltip(params: unknown): string {
-  const p = params as { name?: string; value?: number; color?: string; percent?: number }
-  if (!p?.name)
-    return ''
-  const pct
-    = typeof p.percent === 'number'
-      ? p.percent.toFixed(1)
-      : PIE_TOTAL > 0 && typeof p.value === 'number'
-        ? ((p.value / PIE_TOTAL) * 100).toFixed(1)
-        : '0'
-  const color = p.color ?? '#726FFF'
-  return [
-    '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;',
-    'background:#fff;border-radius:12px;',
-    'box-shadow:0 2px 8px rgba(0,0,0,0.06),0 1px 3px rgba(0,0,0,0.04);',
-    'font-family:PingFang SC,-apple-system,sans-serif;min-width:168px;">',
-    `<span style="display:inline-block;width:4px;height:14px;border-radius:999px;background:${color};flex-shrink:0;"></span>`,
-    `<span style="color:rgba(0,0,0,0.65);font-size:13px;line-height:20px;">${p.name}</span>`,
-    `<span style="margin-left:auto;color:rgba(0,0,0,0.85);font-size:13px;font-weight:600;line-height:20px;">${pct}%</span>`,
-    '</div>',
-  ].join('')
-}
+const PIE_COLORS = ['#5D59FF', '#7A76F5', '#9B97FA', '#BEBCFD', '#E4E3FA'] as const
 
 interface ConsumeRow {
   key: string
@@ -76,19 +37,6 @@ interface ConsumeRow {
   /** 展示为「n（免费额度）」 */
   freeQuota?: boolean
 }
-
-const MOCK_TABLE: ConsumeRow[] = [
-  { key: '1', time: '2026-03-09 14:32', module: 'AI大模型', provider: 'OpenAI', points: 24 },
-  { key: '2', time: '2026-03-09 11:15', module: '智能组件', provider: '星辰AI', points: 0, freeTag: true },
-  { key: '3', time: '2026-03-09 10:08', module: 'OCR识别', provider: '讯飞', points: 6 },
-  { key: '4', time: '2026-03-08 17:45', module: 'AI大模型', provider: '百度文心', points: 18 },
-  { key: '5', time: '2026-03-08 15:22', module: '验证码识别', provider: '星辰AI', points: 4 },
-  { key: '6', time: '2026-03-08 09:30', module: '智能组件', provider: '星辰AI', points: 6 },
-  { key: '7', time: '2026-03-07 16:18', module: '语音识别', provider: '讯飞', points: 12 },
-  { key: '8', time: '2026-03-07 11:05', module: 'AI大模型', provider: 'OpenAI', points: 36 },
-  { key: '9', time: '2026-03-06 14:50', module: 'OCR识别', provider: '讯飞', points: 12, freeQuota: true },
-  { key: '10', time: '2026-03-06 10:12', module: '智能组件', provider: '星辰AI', points: 12, freeQuota: true },
-]
 
 const MODULE_OPTIONS = [
   { value: 'all', label: '全部' },
@@ -119,11 +67,130 @@ const chartScope = ref<ChartScope>('today')
 const moduleFilter = ref<string>('all')
 const dateRange = ref<[Dayjs, Dayjs] | null>(null)
 
+const chartRawRecords = ref<PointsConsumptionRecord[]>([])
+const chartTodaySummary = ref(0)
+const chartMonthSummary = ref(0)
+const chartLoading = ref(false)
+
+const tableRecords = ref<ConsumeRow[]>([])
+const tableTotal = ref(0)
+const tablePageNo = ref(1)
+const tablePageSize = ref(20)
+const tableLoading = ref(false)
+
+function mapConsumptionRow(r: PointsConsumptionRecord): ConsumeRow {
+  return {
+    key: String(r.id),
+    time: r.consumedAt,
+    module: r.module,
+    provider: r.provider,
+    points: r.points,
+    freeTag: r.isFree && r.points === 0,
+    freeQuota: r.isFree && r.points > 0,
+  }
+}
+
+async function loadChartData() {
+  chartLoading.value = true
+  try {
+    const now = dayjs()
+    const params: PointsConsumptionParams = { pageNo: 1, pageSize: 2000 }
+    if (chartScope.value === 'today') {
+      const d = now.format('YYYY-MM-DD')
+      params.startDate = d
+      params.endDate = d
+    }
+    else {
+      params.startDate = now.startOf('month').format('YYYY-MM-DD')
+      params.endDate = now.endOf('month').format('YYYY-MM-DD')
+    }
+    const data = await getPointsConsumptions(params, { toast: false })
+    chartRawRecords.value = data.records
+    chartTodaySummary.value = data.todayConsumption
+    chartMonthSummary.value = data.monthConsumption
+  }
+  catch {
+    chartRawRecords.value = []
+    chartTodaySummary.value = 0
+    chartMonthSummary.value = 0
+  }
+  finally {
+    chartLoading.value = false
+  }
+}
+
+async function loadTable() {
+  tableLoading.value = true
+  try {
+    const params: PointsConsumptionParams = {
+      pageNo: tablePageNo.value,
+      pageSize: tablePageSize.value,
+    }
+    if (moduleFilter.value !== 'all')
+      params.module = moduleFilter.value
+    if (dateRange.value) {
+      params.startDate = dateRange.value[0].format('YYYY-MM-DD')
+      params.endDate = dateRange.value[1].format('YYYY-MM-DD')
+    }
+    const data = await getPointsConsumptions(params)
+    tableRecords.value = data.records.map(mapConsumptionRow)
+    tableTotal.value = data.total
+  }
+  finally {
+    tableLoading.value = false
+  }
+}
+
+watch(chartScope, () => {
+  loadChartData()
+})
+
+watch([moduleFilter, dateRange], () => {
+  tablePageNo.value = 1
+})
+
+watch([moduleFilter, dateRange, tablePageNo, tablePageSize], () => {
+  loadTable()
+}, { immediate: true })
+
 const consumeTitle = computed(() => (chartScope.value === 'today' ? '今日消耗' : '本月消耗'))
 
-const chartTotalPoints = computed(() => {
-  const arr = chartScope.value === 'today' ? TODAY_HOURLY : MONTH_DAILY
-  return arr.reduce((a, b) => a + b, 0)
+const chartTotalPoints = computed(() =>
+  chartScope.value === 'today' ? chartTodaySummary.value : chartMonthSummary.value,
+)
+
+const hourlyBuckets = computed(() => {
+  const buckets = Array.from({ length: 24 }, () => 0)
+  for (const r of chartRawRecords.value) {
+    const h = dayjs(r.consumedAt).hour()
+    buckets[h] += r.points
+  }
+  return buckets
+})
+
+const dailyBuckets = computed(() => {
+  const days = dayjs().daysInMonth()
+  const buckets = Array.from({ length: days }, () => 0)
+  for (const r of chartRawRecords.value) {
+    const d = dayjs(r.consumedAt).date()
+    if (d >= 1 && d <= days)
+      buckets[d - 1] += r.points
+  }
+  return buckets
+})
+
+const pieSlices = computed(() => {
+  const map = new Map<string, number>()
+  for (const r of chartRawRecords.value) {
+    const m = r.module || '其他'
+    map.set(m, (map.get(m) ?? 0) + r.points)
+  }
+  const entries = [...map.entries()].sort((a, b) => b[1] - a[1])
+  return entries.map(([name, value], i) => ({
+    name,
+    value,
+    itemStyle: { color: PIE_COLORS[i % PIE_COLORS.length] },
+  }))
 })
 
 /** 柱状默认浅蓝；hover 为品牌紫（与设计稿一致） */
@@ -171,8 +238,9 @@ const barChartOption = computed<EChartsCoreOption>(() => {
   }
 
   if (chartScope.value === 'today') {
-    const categories = TODAY_HOURLY.map((_, i) => `${i}:00`)
-    const data = buildBarSeriesData(TODAY_HOURLY)
+    const values = hourlyBuckets.value
+    const categories = values.map((_, i) => `${i}:00`)
+    const data = buildBarSeriesData(values)
     return {
       grid: { left: 2, right: 2, top: 4, bottom: 18, containLabel: false },
       xAxis: {
@@ -210,7 +278,7 @@ const barChartOption = computed<EChartsCoreOption>(() => {
           if (p == null || typeof p.dataIndex !== 'number')
             return ''
           const idx = p.dataIndex
-          const v = TODAY_HOURLY[idx] ?? 0
+          const v = hourlyBuckets.value[idx] ?? 0
           const next = (idx + 1) % 24
           const range = `${idx}:00-${next}:00`
           return formatBarTooltipHtml(range, v)
@@ -220,8 +288,9 @@ const barChartOption = computed<EChartsCoreOption>(() => {
     }
   }
 
-  const categories = MONTH_DAILY.map((_, i) => `${i + 1}日`)
-  const data = buildBarSeriesData(MONTH_DAILY)
+  const monthVals = dailyBuckets.value
+  const categories = monthVals.map((_, i) => `${i + 1}日`)
+  const data = buildBarSeriesData(monthVals)
   return {
     grid: { left: 2, right: 2, top: 4, bottom: 18, containLabel: false },
     xAxis: {
@@ -236,7 +305,7 @@ const barChartOption = computed<EChartsCoreOption>(() => {
         interval: 0,
         formatter: (_value: string, index: number) => {
           const day = index + 1
-          if ([5, 10, 15, 20, 25].includes(day))
+          if (day === 1 || day === 15 || day === monthVals.length || day % 5 === 0)
             return `${day}日`
           return ''
         },
@@ -259,7 +328,7 @@ const barChartOption = computed<EChartsCoreOption>(() => {
         if (p == null || typeof p.dataIndex !== 'number')
           return ''
         const idx = p.dataIndex
-        const v = MONTH_DAILY[idx] ?? 0
+        const v = monthVals[idx] ?? 0
         return formatBarTooltipHtml(categories[idx] ?? '', v)
       },
     },
@@ -267,104 +336,120 @@ const barChartOption = computed<EChartsCoreOption>(() => {
   }
 })
 
-const pieChartOption = computed<EChartsCoreOption>(() => ({
-  tooltip: {
-    trigger: 'item',
-    show: true,
-    backgroundColor: 'transparent',
-    borderWidth: 0,
-    padding: 0,
-    shadowBlur: 0,
-    extraCssText: 'box-shadow:none;',
-    formatter: formatPieTooltip,
-  },
-  series: [
-    {
-      type: 'pie',
-      radius: ['56%', '74%'],
-      center: ['28%', '52%'],
-      clockwise: true,
-      minAngle: 2,
-      avoidLabelOverlap: false,
-      itemStyle: {
-        borderColor: '#fff',
-        borderWidth: 2,
-      },
-      label: { show: false },
-      emphasis: {
-        focus: 'self',
-        scale: true,
-        scaleSize: 6,
-        itemStyle: {
-          shadowBlur: 12,
-          shadowColor: 'rgba(93, 89, 255, 0.25)',
-        },
-      },
-      blur: {
-        itemStyle: { opacity: 0.55 },
-      },
-      data: PIE_ITEMS.map(p => ({
-        name: p.name,
-        value: p.value,
-        itemStyle: { color: p.color },
-      })),
-    },
-  ],
-  legend: {
-    orient: 'vertical',
-    right: '0%',
-    top: 'middle',
-    itemWidth: 8,
-    itemHeight: 8,
-    icon: 'circle',
-    itemGap: 10,
-    textStyle: {
-      color: 'rgba(0,0,0,0.65)',
-      fontSize: 12,
-      fontFamily: 'PingFang SC, sans-serif',
-      lineHeight: 16,
-    },
-  },
-}))
-
-const filteredTableData = computed(() => {
-  let rows = MOCK_TABLE
-  if (moduleFilter.value !== 'all')
-    rows = rows.filter(r => r.module === moduleFilter.value)
-  if (dateRange.value) {
-    const [start, end] = dateRange.value
-    const startMs = start.startOf('day').valueOf()
-    const endMs = end.endOf('day').valueOf()
-    rows = rows.filter((r) => {
-      const t = dayjs(r.time, 'YYYY-MM-DD HH:mm').valueOf()
-      return t >= startMs && t <= endMs
-    })
+const pieChartOption = computed<EChartsCoreOption>(() => {
+  const slices = pieSlices.value
+  const pieTotal = slices.reduce((s, p) => s + p.value, 0)
+  function formatPieTooltip(params: unknown): string {
+    const p = params as { name?: string; value?: number; color?: string; percent?: number }
+    if (!p?.name)
+      return ''
+    const pct
+      = typeof p.percent === 'number'
+        ? p.percent.toFixed(1)
+        : pieTotal > 0 && typeof p.value === 'number'
+          ? ((p.value / pieTotal) * 100).toFixed(1)
+          : '0'
+    const color = p.color ?? '#726FFF'
+    return [
+      '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;',
+      'background:#fff;border-radius:12px;',
+      'box-shadow:0 2px 8px rgba(0,0,0,0.06),0 1px 3px rgba(0,0,0,0.04);',
+      'font-family:PingFang SC,-apple-system,sans-serif;min-width:168px;">',
+      `<span style="display:inline-block;width:4px;height:14px;border-radius:999px;background:${color};flex-shrink:0;"></span>`,
+      `<span style="color:rgba(0,0,0,0.65);font-size:13px;line-height:20px;">${p.name}</span>`,
+      `<span style="margin-left:auto;color:rgba(0,0,0,0.85);font-size:13px;font-weight:600;line-height:20px;">${pct}%</span>`,
+      '</div>',
+    ].join('')
   }
-  return rows
+  return {
+    tooltip: {
+      trigger: 'item',
+      show: true,
+      backgroundColor: 'transparent',
+      borderWidth: 0,
+      padding: 0,
+      shadowBlur: 0,
+      extraCssText: 'box-shadow:none;',
+      formatter: formatPieTooltip,
+    },
+    series: [
+      {
+        type: 'pie',
+        radius: ['56%', '74%'],
+        center: ['28%', '52%'],
+        clockwise: true,
+        minAngle: 2,
+        avoidLabelOverlap: false,
+        itemStyle: {
+          borderColor: '#fff',
+          borderWidth: 2,
+        },
+        label: { show: false },
+        emphasis: {
+          focus: 'self',
+          scale: true,
+          scaleSize: 6,
+          itemStyle: {
+            shadowBlur: 12,
+            shadowColor: 'rgba(93, 89, 255, 0.25)',
+          },
+        },
+        blur: {
+          itemStyle: { opacity: 0.55 },
+        },
+        data: slices,
+      },
+    ],
+    legend: {
+      orient: 'vertical',
+      right: '0%',
+      top: 'middle',
+      itemWidth: 8,
+      itemHeight: 8,
+      icon: 'circle',
+      itemGap: 10,
+      textStyle: {
+        color: 'rgba(0,0,0,0.65)',
+        fontSize: 12,
+        fontFamily: 'PingFang SC, sans-serif',
+        lineHeight: 16,
+      },
+    },
+  }
 })
 
-/** 行高约 48px（与单元格 padding 一致） */
 const CONSUME_TABLE_ROW_PX = 48
-/** 小表格 thead 占用高度（与 ant-table-small 表头大致一致） */
-const CONSUME_TABLE_HEAD_PX = 46
 
-const consumeTableWrapRef = ref<HTMLElement | null>(null)
-/** 表体可滚动区域高度 = 外层 flex 容器高度 − 表头，随卡片剩余高度变化 */
-const consumeTableBodyMaxPx = ref(280)
+const consumeTableFrameRef = ref<HTMLElement | null>(null)
+const consumeTableBodyScrollY = ref(360)
 
-useResizeObserver(consumeTableWrapRef, (entries) => {
-  const h = entries[0]?.contentRect.height ?? 0
-  const body = Math.floor(h - CONSUME_TABLE_HEAD_PX)
-  if (body < 80)
+function measureConsumeTableBodyScroll() {
+  const root = consumeTableFrameRef.value
+  if (!root)
     return
-  consumeTableBodyMaxPx.value = body
+  const thead = root.querySelector('.ant-table-thead')
+  const headH = thead instanceof HTMLElement ? thead.offsetHeight : 46
+  consumeTableBodyScrollY.value = Math.max(80, Math.floor(root.clientHeight - headH))
+}
+
+useResizeObserver(consumeTableFrameRef, () => {
+  void nextTick(() => measureConsumeTableBodyScroll())
+})
+
+watch([tableRecords, tableLoading], () => {
+  void nextTick(() => measureConsumeTableBodyScroll())
+})
+
+onMounted(() => {
+  loadChartData()
+  void nextTick(() => measureConsumeTableBodyScroll())
 })
 
 const consumeTableScroll = computed(() => {
-  const n = filteredTableData.value.length
+  const n = tableRecords.value.length
   if (n === 0)
     return undefined
-  const maxY = consumeTableBodyMaxPx.value
+  const maxY = consumeTableBodyScrollY.value
   const contentH = n * CONSUME_TABLE_ROW_PX
   if (contentH <= maxY)
     return undefined
@@ -437,7 +522,9 @@ const columns = computed<ColumnsType<ConsumeRow>>(() => [
 </script>
 
 <template>
-  <div class="flex min-h-0 flex-1 flex-col gap-4 self-stretch overflow-hidden">
+  <div
+    class="flex min-h-0 min-w-0 flex-1 flex-col gap-4 self-stretch overflow-y-auto overscroll-contain"
+  >
     <!-- 上图表行：允许饼图 hover 略超出，不被祖先裁切 -->
     <div class="flex shrink-0 gap-4 self-stretch overflow-visible">
       <!-- 今日/本月消耗 + 柱状图 -->
@@ -467,7 +554,9 @@ const columns = computed<ColumnsType<ConsumeRow>>(() => [
         </div>
 
         <div class="relative min-h-[120px] w-full flex-1">
-          <VChart class="consume-bar-chart" :option="barChartOption" autoresize />
+          <a-spin :spinning="chartLoading" class="min-h-[120px] w-full">
+            <VChart class="consume-bar-chart" :option="barChartOption" autoresize />
+          </a-spin>
         </div>
 
         <!-- 今日 / 本月 -->
@@ -513,16 +602,18 @@ const columns = computed<ColumnsType<ConsumeRow>>(() => [
         <div class="consume-pie-chart-zone min-h-0 min-w-0 flex-1">
           <div class="box-border h-full w-full p-2">
             <div class="consume-pie-hover-room box-border h-full w-full p-4">
-              <VChart class="consume-pie-chart h-full w-full min-h-[120px]" :option="pieChartOption" autoresize />
+              <a-spin :spinning="chartLoading" class="block h-full min-h-[120px] w-full">
+                <VChart class="consume-pie-chart h-full w-full min-h-[120px]" :option="pieChartOption" autoresize />
+              </a-spin>
             </div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- 消耗明细：flex-1 铺满弹窗剩余高度，避免卡片边框下方留白 -->
+    <!-- 消耗明细：整块卡片固定高度 412px，表格外框占满剩余区域 -->
     <div
-      class="flex min-h-0 min-w-0 flex-1 flex-col gap-4 self-stretch overflow-hidden rounded-2xl border border-solid border-[rgba(0,0,0,0.10)] bg-white px-6 pb-6 pt-6 dark:border-[rgba(255,255,255,0.14)] dark:bg-[#1a1a1a]"
+      class="consume-detail-section flex min-w-0 flex-col gap-4 self-stretch overflow-hidden rounded-2xl border border-solid border-[rgba(0,0,0,0.10)] bg-white px-6 pb-6 pt-6 dark:border-[rgba(255,255,255,0.14)] dark:bg-[#1a1a1a]"
     >
       <div class="flex shrink-0 items-start justify-between gap-4 self-stretch">
         <span class="text-base font-semibold leading-[25.6px] text-[rgba(0,0,0,0.85)] dark:text-[rgba(255,255,255,0.85)]">
@@ -561,17 +652,29 @@ const columns = computed<ColumnsType<ConsumeRow>>(() => [
       </div>
 
       <div
-        ref="consumeTableWrapRef"
-        class="consume-detail-table-wrap min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden rounded-xl"
+        ref="consumeTableFrameRef"
+        class="consume-table-frame consume-detail-table-wrap box-border min-h-0 w-full min-w-0 flex-1 overflow-hidden"
       >
-        <Table
-          row-key="key"
-          :columns="columns"
-          :data-source="filteredTableData"
-          :pagination="false"
-          :scroll="consumeTableScroll"
+        <a-spin :spinning="tableLoading" class="h-full min-h-0 w-full [&_.ant-spin-container]:h-full">
+          <Table
+            row-key="key"
+            :columns="columns"
+            :data-source="tableRecords"
+            :pagination="false"
+            :scroll="consumeTableScroll"
+            size="small"
+            class="consume-detail-table"
+          />
+        </a-spin>
+      </div>
+
+      <div v-if="tableTotal > 0" class="flex shrink-0 justify-end pt-1">
+        <a-pagination
+          v-model:current="tablePageNo"
+          v-model:page-size="tablePageSize"
+          :total="tableTotal"
+          :show-size-changer="true"
           size="small"
-          class="consume-detail-table"
         />
       </div>
     </div>
@@ -641,9 +744,22 @@ const columns = computed<ColumnsType<ConsumeRow>>(() => [
   }
 }
 
+.consume-detail-section {
+  box-sizing: border-box;
+  height: 412px;
+  min-height: 412px;
+  max-height: 412px;
+  flex-shrink: 0;
+}
+
 .consume-detail-table-wrap {
   display: flex;
   flex-direction: column;
+}
+
+.consume-table-frame {
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 .consume-detail-table {

@@ -1,27 +1,26 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { message } from 'ant-design-vue'
+import { computed, onMounted, ref } from 'vue'
+
+import type { PointsBalance } from '@/api/points'
+import { getPaymentProducts, getPointsBalance, POINTS_PER_CNY, postPaymentRecharge } from '@/api/points'
 
 const props = withDefaults(
   defineProps<{
     workspaceName?: string
-    currentBalance?: number
-    balanceCap?: number
-    spaceTotal?: number
-    quotaPercent?: number
-    monthConsumed?: number
   }>(),
   {
     workspaceName: '星辰科技工作空间',
-    currentBalance: 824,
-    balanceCap: 1250,
-    spaceTotal: 5000,
-    quotaPercent: 25,
-    monthConsumed: 3420,
   },
 )
 
-/** 积分 : 现金 = 100 : 1（元） */
-const POINTS_PER_YUAN = 100
+const balance = ref<PointsBalance | null>(null)
+const balanceLoading = ref(false)
+/** 默认用于「立即充值」的商品（来自商品列表首条） */
+const defaultProduct = ref<{ prodId: number, versionId: number } | null>(null)
+const rechargeLoading = ref(false)
+
+const POINTS_PER_YUAN = POINTS_PER_CNY
 const CUSTOM_POINTS_MIN = 100
 const CUSTOM_POINTS_MAX = 99_999_999
 
@@ -86,17 +85,32 @@ function formatCashFromPoints(points: number) {
   return `¥${yuan.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
-/**
- * 进度条占比：当前余额 / 可用总额度（balanceCap，即配额折算后的额度上限），与右上角「配额 xx%」展示解耦。
- */
-const balanceUsagePercent = computed(() => {
-  const cap = props.balanceCap
-  if (!cap || cap <= 0)
+function selectPackage(id: string) {
+  selectedPackageId.value = id
+  customPoints.value = ''
+}
+
+const currentBalance = computed(() => balance.value?.totalBalance ?? 0)
+const monthConsumed = computed(() => balance.value?.monthConsumption ?? 0)
+const spaceTotal = computed(() => balance.value?.tenantTotalBalance ?? 0)
+const balanceCap = computed(() => {
+  const cap = spaceTotal.value
+  return cap > 0 ? cap : Math.max(currentBalance.value, 1)
+})
+const quotaPercent = computed(() => {
+  const q = balance.value?.freeQuota
+  if (!q?.weeklyTotal)
     return 0
-  return Math.min(100, Math.max(0, (props.currentBalance / cap) * 100))
+  return Math.min(100, Math.round((q.weeklyUsed / q.weeklyTotal) * 100))
 })
 
-/** 进度条颜色：0–20% 红、20–40% 橙、40–100% 品牌紫（按余额占用比例分段） */
+const balanceUsagePercent = computed(() => {
+  const cap = balanceCap.value
+  if (!cap || cap <= 0)
+    return 0
+  return Math.min(100, Math.max(0, (currentBalance.value / cap) * 100))
+})
+
 const balanceProgressBarColor = computed(() => {
   const p = balanceUsagePercent.value
   if (p < 20)
@@ -106,14 +120,80 @@ const balanceProgressBarColor = computed(() => {
   return '#726FFF'
 })
 
-function selectPackage(id: string) {
-  selectedPackageId.value = id
-  customPoints.value = ''
+async function loadBalance() {
+  balanceLoading.value = true
+  try {
+    balance.value = await getPointsBalance()
+  }
+  finally {
+    balanceLoading.value = false
+  }
+}
+
+function pickFirstProduct(raw: unknown): { prodId: number, versionId: number } | null {
+  if (raw == null || typeof raw !== 'object')
+    return null
+  const o = raw as Record<string, unknown>
+  const list = (o.records ?? o.list ?? (Array.isArray(o) ? o : null)) as unknown
+  if (!Array.isArray(list) || list.length === 0)
+    return null
+  const first = list[0]
+  if (first == null || typeof first !== 'object')
+    return null
+  const p = first as Record<string, unknown>
+  const prodId = p.prodId ?? p.prod_id
+  const versionId = p.versionId ?? p.version_id
+  if (typeof prodId === 'number' && typeof versionId === 'number')
+    return { prodId, versionId }
+  return null
+}
+
+onMounted(async () => {
+  await loadBalance()
+  try {
+    const raw = await getPaymentProducts({ pageNo: 1, pageSize: 20 })
+    defaultProduct.value = pickFirstProduct(raw)
+  }
+  catch {
+    defaultProduct.value = null
+  }
+})
+
+async function handleRecharge() {
+  if (!defaultProduct.value) {
+    message.warning('暂无可购商品，请稍后再试')
+    return
+  }
+  const custom = parsedCustomPoints.value
+  if (custom != null && (custom < CUSTOM_POINTS_MIN || custom > CUSTOM_POINTS_MAX || custom % 100 !== 0)) {
+    message.warning(`自定义积分需为 ${CUSTOM_POINTS_MIN}～${CUSTOM_POINTS_MAX.toLocaleString()} 且为 100 的倍数`)
+    return
+  }
+  rechargeLoading.value = true
+  try {
+    const res = await postPaymentRecharge({
+      prodId: defaultProduct.value.prodId,
+      versionId: defaultProduct.value.versionId,
+      channel: 'ALIPAY',
+      ...(custom != null ? { customPoints: custom } : {}),
+    })
+    const pay = res?.charge
+    if (pay && /^https?:\/\//i.test(String(pay)))
+      window.open(String(pay), '_blank', 'noopener,noreferrer')
+    else
+      message.success('订单已创建')
+    await loadBalance()
+  }
+  finally {
+    rechargeLoading.value = false
+  }
 }
 </script>
 
 <template>
-  <div class="flex min-h-0 flex-1 flex-col gap-6 self-stretch overflow-y-auto">
+  <div
+    class="flex min-h-0 min-w-0 flex-1 flex-col gap-6 self-stretch overflow-y-auto overscroll-contain"
+  >
     <div class="text-[15px] leading-[25.5px] !text-[rgba(0,0,0,0.65)] dark:!text-[rgba(255,255,255,0.65)]">
       <span>充值后可使用星辰RPA平台提供的AI智能、OCR、验证码等扩展服务。</span>
       <button
@@ -125,7 +205,8 @@ function selectPackage(id: string) {
     </div>
 
     <div class="flex flex-col gap-6 self-stretch">
-      <div class="grid w-full grid-cols-2 gap-4 self-stretch">
+      <a-spin :spinning="balanceLoading" class="w-full [&_.ant-spin-container]:min-h-[144px]">
+        <div class="grid w-full grid-cols-2 gap-4 self-stretch">
         <!-- 当前余额 -->
         <div
           class="flex min-h-[144px] min-w-0 flex-col gap-[14px] rounded-2xl border border-solid bg-white p-6 !border-[rgba(0,0,0,0.10)] dark:bg-[#1a1a1a] dark:!border-[rgba(255,255,255,0.14)]"
@@ -197,7 +278,8 @@ function selectPackage(id: string) {
             </span>
           </div>
         </div>
-      </div>
+        </div>
+      </a-spin>
 
       <!-- 充值积分 -->
       <div class="flex flex-col gap-4 self-stretch">
@@ -239,7 +321,7 @@ function selectPackage(id: string) {
           </button>
         </div>
 
-        <div
+        <!-- <div
           class="inline-flex h-10 min-w-0 items-center gap-2 self-stretch rounded-xl border border-solid bg-white px-3 !border-[rgba(0,0,0,0.10)] dark:bg-[#1a1a1a] dark:!border-[rgba(255,255,255,0.14)]"
         >
           <input
@@ -257,7 +339,7 @@ function selectPackage(id: string) {
           >
             积分
           </span>
-        </div>
+        </div> -->
 
         <div
           class="inline-flex min-h-[88px] items-center justify-between gap-4 self-stretch rounded-2xl border border-solid bg-white px-6 py-4 !border-[rgba(0,0,0,0.10)] dark:bg-[#1a1a1a] dark:!border-[rgba(255,255,255,0.14)]"
@@ -292,9 +374,13 @@ function selectPackage(id: string) {
           <button
             type="button"
             class="flex h-[46px] w-[140px] shrink-0 items-center justify-center rounded-[10px] border-0 bg-[#726FFF] px-8 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-            :disabled="!canRecharge"
+            :disabled="!canRecharge || rechargeLoading"
+            :aria-busy="rechargeLoading"
+            @click="handleRecharge"
           >
-            <span class="text-center text-[15px] font-semibold text-white">立即充值</span>
+            <span class="text-center text-[15px] font-semibold text-white">
+              {{ rechargeLoading ? '提交中…' : '立即充值' }}
+            </span>
           </button>
         </div>
       </div>

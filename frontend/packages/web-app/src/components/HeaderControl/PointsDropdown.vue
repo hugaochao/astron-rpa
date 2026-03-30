@@ -10,8 +10,10 @@ const props = withDefaults(
     planEdition?: TenantEditionKey
     /** 积分数量 */
     points?: number
-    /** 智能组件可对话次数额度 */
+    /** 周免费剩余额度（与接口 freeQuota.weeklyRemaining 一致） */
     dialogueCount?: number
+    /** 有值时覆盖底部灰色提示（如接口 resetTime） */
+    quotaResetHint?: string
   }>(),
   {
     planEdition: TENANT_EDITION.Personal,
@@ -88,7 +90,7 @@ const resetHintText = computed(
         <div
           class="inline-flex items-center justify-center pl-5 text-center text-xs font-normal !text-[rgba(0,0,0,0.25)] dark:!text-[rgba(255,255,255,0.25)]"
         >
-          {{ resetHintText }}
+          {{ props.quotaResetHint ?? resetHintText }}
         </div>
       </div>
     </div>

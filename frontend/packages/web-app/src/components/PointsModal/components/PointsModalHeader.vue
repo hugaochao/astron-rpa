@@ -32,8 +32,8 @@ function selectTab(key: PointsModalTabKey) {
           class="whitespace-nowrap"
           :class="
             activeTab === tab.key
-              ? 'text-2xl font-bold text-[#1A1512] dark:text-white'
-              : 'text-xl font-medium !text-[rgba(0,0,0,0.45)] dark:!text-[rgba(255,255,255,0.45)]'
+              ? 'text-[20px] font-bold leading-[28px] text-[#1A1512] dark:text-white'
+              : 'text-[16px] font-medium leading-[24px] !text-[rgba(0,0,0,0.45)] dark:!text-[rgba(255,255,255,0.45)]'
           "
         >
           {{ tab.label }}
