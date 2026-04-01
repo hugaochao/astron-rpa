@@ -5,6 +5,14 @@ import { computed, onMounted, ref } from 'vue'
 import type { PointsBalance } from '@/api/points'
 import { getPaymentProducts, getPointsBalance, POINTS_PER_CNY, postPaymentRecharge } from '@/api/points'
 
+/** 充值档位：来自 getPaymentProducts 的 products，price 为积分数量 */
+interface RechargePackageOption {
+  id: string
+  points: number
+  prodId: number
+  versionId: number
+}
+
 const props = withDefaults(
   defineProps<{
     workspaceName?: string
@@ -16,27 +24,26 @@ const props = withDefaults(
 
 const balance = ref<PointsBalance | null>(null)
 const balanceLoading = ref(false)
-/** 默认用于「立即充值」的商品（来自商品列表首条） */
-const defaultProduct = ref<{ prodId: number, versionId: number } | null>(null)
+const packageOptions = ref<RechargePackageOption[]>([])
+const productsLoading = ref(false)
 const rechargeLoading = ref(false)
 
 const POINTS_PER_YUAN = POINTS_PER_CNY
 const CUSTOM_POINTS_MIN = 100
 const CUSTOM_POINTS_MAX = 99_999_999
 
-const packageOptions = [
-  { id: '500', points: 500 },
-  { id: '2000', points: 2000 },
-  { id: '5000', points: 5000 },
-  { id: '10000', points: 10000 },
-] as const
-
-const selectedPackageId = ref<string>('2000')
+const selectedPackageId = ref<string>('')
 const customPoints = ref('')
 
-const selectedPackage = computed(
-  () => packageOptions.find(p => p.id === selectedPackageId.value) ?? packageOptions[1],
-)
+const selectedPackage = computed((): RechargePackageOption | null => {
+  const list = packageOptions.value
+  if (list.length === 0)
+    return null
+  const cur = list.find(p => p.id === selectedPackageId.value)
+  if (cur)
+    return cur
+  return list.length > 1 ? list[1]! : list[0]!
+})
 
 /** 自定义框有内容时视为走自定义档位，套餐仅保留高亮逻辑上的「未选中」 */
 const isCustomMode = computed(() => customPoints.value.length > 0)
@@ -67,17 +74,23 @@ const parsedCustomPoints = computed(() => {
 
 /** 实际充值积分：有合法自定义用自定义，否则用当前选中套餐 */
 const effectiveRechargePoints = computed(() =>
-  parsedCustomPoints.value ?? selectedPackage.value.points,
+  parsedCustomPoints.value ?? selectedPackage.value?.points ?? 0,
 )
 
 const formattedRechargeCash = computed(() =>
   formatCashFromPoints(effectiveRechargePoints.value),
 )
 
-/** 与文案「100-99,999,999」一致，用于按钮可用态 */
+/** 套餐档位：正整数且不超过上限；自定义（若启用）需满足 100 倍数与区间 */
 const canRecharge = computed(() => {
-  const p = effectiveRechargePoints.value
-  return p >= CUSTOM_POINTS_MIN && p <= CUSTOM_POINTS_MAX
+  if (!selectedPackage.value)
+    return false
+  const custom = parsedCustomPoints.value
+  if (custom != null) {
+    return custom >= CUSTOM_POINTS_MIN && custom <= CUSTOM_POINTS_MAX && custom % 100 === 0
+  }
+  const p = selectedPackage.value.points
+  return p > 0 && p <= CUSTOM_POINTS_MAX
 })
 
 function formatCashFromPoints(points: number) {
@@ -130,37 +143,69 @@ async function loadBalance() {
   }
 }
 
-function pickFirstProduct(raw: unknown): { prodId: number, versionId: number } | null {
-  if (raw == null || typeof raw !== 'object')
-    return null
-  const o = raw as Record<string, unknown>
-  const list = (o.records ?? o.list ?? (Array.isArray(o) ? o : null)) as unknown
-  if (!Array.isArray(list) || list.length === 0)
-    return null
-  const first = list[0]
-  if (first == null || typeof first !== 'object')
-    return null
-  const p = first as Record<string, unknown>
-  const prodId = p.prodId ?? p.prod_id
-  const versionId = p.versionId ?? p.version_id
-  if (typeof prodId === 'number' && typeof versionId === 'number')
-    return { prodId, versionId }
-  return null
+function parseRechargePackages(raw: unknown): RechargePackageOption[] {
+  if (raw == null)
+    return []
+  const list: unknown = Array.isArray(raw)
+    ? raw
+    : (raw as Record<string, unknown>).products
+      ?? (raw as Record<string, unknown>).records
+      ?? (raw as Record<string, unknown>).list
+  if (!Array.isArray(list))
+    return []
+  const out: RechargePackageOption[] = []
+  for (const item of list) {
+    if (item == null || typeof item !== 'object')
+      continue
+    const p = item as Record<string, unknown>
+    const prodId = p.id ?? p.prodId ?? p.prod_id
+    const versionRaw = p.versionid ?? p.versionId ?? p.version_id
+    const priceRaw = p.price ?? p.floorprice ?? p.floorPrice
+    const versionId = typeof versionRaw === 'number' ? versionRaw : Number(versionRaw)
+    const points = typeof priceRaw === 'number' ? priceRaw : Number(priceRaw)
+    if (typeof prodId !== 'number' || !Number.isFinite(versionId) || !Number.isFinite(points) || points <= 0)
+      continue
+    out.push({
+      id: String(prodId),
+      points,
+      prodId,
+      versionId,
+    })
+  }
+  out.sort((a, b) => a.points - b.points)
+  return out
+}
+
+async function loadPaymentProducts() {
+  productsLoading.value = true
+  try {
+    const raw = await getPaymentProducts({ pageNo: 1, pageSize: 20 })
+    const opts = parseRechargePackages(raw)
+    packageOptions.value = opts
+    if (opts.length === 0) {
+      selectedPackageId.value = ''
+      return
+    }
+    const preferSecond = opts.length > 1 ? opts[1]! : opts[0]!
+    selectedPackageId.value = preferSecond.id
+  }
+  catch {
+    packageOptions.value = []
+    selectedPackageId.value = ''
+  }
+  finally {
+    productsLoading.value = false
+  }
 }
 
 onMounted(async () => {
   await loadBalance()
-  try {
-    const raw = await getPaymentProducts({ pageNo: 1, pageSize: 20 })
-    defaultProduct.value = pickFirstProduct(raw)
-  }
-  catch {
-    defaultProduct.value = null
-  }
+  await loadPaymentProducts()
 })
 
 async function handleRecharge() {
-  if (!defaultProduct.value) {
+  const pkg = selectedPackage.value
+  if (!pkg) {
     message.warning('暂无可购商品，请稍后再试')
     return
   }
@@ -172,8 +217,8 @@ async function handleRecharge() {
   rechargeLoading.value = true
   try {
     const res = await postPaymentRecharge({
-      prodId: defaultProduct.value.prodId,
-      versionId: defaultProduct.value.versionId,
+      prodId: pkg.prodId,
+      versionId: pkg.versionId,
       channel: 'ALIPAY',
       ...(custom != null ? { customPoints: custom } : {}),
     })
@@ -297,6 +342,7 @@ async function handleRecharge() {
           </p>
         </div>
 
+        <a-spin :spinning="productsLoading" class="min-h-[120px] w-full [&_.ant-spin-container]:flex [&_.ant-spin-container]:w-full [&_.ant-spin-container]:gap-4">
         <div class="flex w-full gap-[16px] self-stretch">
           <button
             v-for="pkg in packageOptions"
@@ -320,6 +366,7 @@ async function handleRecharge() {
             </span>
           </button>
         </div>
+        </a-spin>
 
         <!-- <div
           class="inline-flex h-10 min-w-0 items-center gap-2 self-stretch rounded-xl border border-solid bg-white px-3 !border-[rgba(0,0,0,0.10)] dark:bg-[#1a1a1a] dark:!border-[rgba(255,255,255,0.14)]"
@@ -374,7 +421,7 @@ async function handleRecharge() {
           <button
             type="button"
             class="flex h-[46px] w-[140px] shrink-0 items-center justify-center rounded-[10px] border-0 bg-[#726FFF] px-8 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-            :disabled="!canRecharge || rechargeLoading"
+            :disabled="!canRecharge || rechargeLoading || productsLoading"
             :aria-busy="rechargeLoading"
             @click="handleRecharge"
           >

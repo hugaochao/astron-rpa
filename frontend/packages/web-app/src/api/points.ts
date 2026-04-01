@@ -70,6 +70,50 @@ export async function getPointsConsumptions(
   return res.data
 }
 
+// --- 控制台：积分消耗柱状图 GET /console/points/consumption-bar ---
+
+export type PointsConsumptionChartPeriod = 'today' | 'month'
+
+export interface PointsConsumptionBarItem {
+  label: string
+  usedPoints: number
+}
+
+export interface PointsConsumptionBarData {
+  period: PointsConsumptionChartPeriod
+  totalUsed: number
+  items: PointsConsumptionBarItem[]
+}
+
+export async function getPointsConsumptionBar(
+  params: { period: PointsConsumptionChartPeriod },
+  config?: RequestConfig<PointsConsumptionBarData>,
+) {
+  const res = await http.get<PointsConsumptionBarData>(`${P}/console/points/consumption-bar`, params, config)
+  return res.data
+}
+
+// --- 控制台：积分消耗模块分布饼图 GET /console/points/consumption-pie ---
+
+export interface PointsConsumptionPieItem {
+  module: string
+  usedPoints: number
+}
+
+export interface PointsConsumptionPieData {
+  period: PointsConsumptionChartPeriod
+  totalUsed: number
+  items: PointsConsumptionPieItem[]
+}
+
+export async function getPointsConsumptionPie(
+  params: { period: PointsConsumptionChartPeriod },
+  config?: RequestConfig<PointsConsumptionPieData>,
+) {
+  const res = await http.get<PointsConsumptionPieData>(`${P}/console/points/consumption-pie`, params, config)
+  return res.data
+}
+
 // --- 4.3 手动激活 POST /points/activate（一般无需调，balance 会自动激活）---
 
 export async function postPointsActivate() {
@@ -83,6 +127,17 @@ export interface PaymentProductsParams {
   type?: string
   pageNo?: number
   pageSize?: number
+}
+
+/** GET /payment/products 透传字段（与交易服务对齐，键名可能为小写） */
+export interface PaymentProductItem {
+  id: number
+  versionid?: number
+  versionId?: number
+  name?: string
+  price: number
+  floorprice?: number
+  type?: string
 }
 
 export async function getPaymentProducts(params?: PaymentProductsParams) {

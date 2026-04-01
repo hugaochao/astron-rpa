@@ -17,8 +17,17 @@ import { useResizeObserver } from '@vueuse/core'
 import { computed, h, nextTick, onMounted, ref, watch } from 'vue'
 import VChart from 'vue-echarts'
 
-import type { PointsConsumptionParams, PointsConsumptionRecord } from '@/api/points'
-import { getPointsConsumptions } from '@/api/points'
+import type {
+  PointsConsumptionBarData,
+  PointsConsumptionParams,
+  PointsConsumptionPieData,
+  PointsConsumptionRecord,
+} from '@/api/points'
+import {
+  getPointsConsumptionBar,
+  getPointsConsumptionPie,
+  getPointsConsumptions,
+} from '@/api/points'
 
 use([CanvasRenderer, BarChart, PieChart, GridComponent, TooltipComponent, LegendComponent])
 
@@ -67,10 +76,11 @@ const chartScope = ref<ChartScope>('today')
 const moduleFilter = ref<string>('all')
 const dateRange = ref<[Dayjs, Dayjs] | null>(null)
 
-const chartRawRecords = ref<PointsConsumptionRecord[]>([])
-const chartTodaySummary = ref(0)
-const chartMonthSummary = ref(0)
 const chartLoading = ref(false)
+/** 柱状图：服务端按桶返回 label + usedPoints */
+const barChartData = ref<PointsConsumptionBarData | null>(null)
+/** 饼图：按模块聚合 */
+const pieChartData = ref<PointsConsumptionPieData | null>(null)
 
 const tableRecords = ref<ConsumeRow[]>([])
 const tableTotal = ref(0)
@@ -92,27 +102,18 @@ function mapConsumptionRow(r: PointsConsumptionRecord): ConsumeRow {
 
 async function loadChartData() {
   chartLoading.value = true
+  const period = chartScope.value
   try {
-    const now = dayjs()
-    const params: PointsConsumptionParams = { pageNo: 1, pageSize: 2000 }
-    if (chartScope.value === 'today') {
-      const d = now.format('YYYY-MM-DD')
-      params.startDate = d
-      params.endDate = d
-    }
-    else {
-      params.startDate = now.startOf('month').format('YYYY-MM-DD')
-      params.endDate = now.endOf('month').format('YYYY-MM-DD')
-    }
-    const data = await getPointsConsumptions(params, { toast: false })
-    chartRawRecords.value = data.records
-    chartTodaySummary.value = data.todayConsumption
-    chartMonthSummary.value = data.monthConsumption
+    const [bar, pie] = await Promise.all([
+      getPointsConsumptionBar({ period }, { toast: false }),
+      getPointsConsumptionPie({ period }, { toast: false }),
+    ])
+    barChartData.value = bar
+    pieChartData.value = pie
   }
   catch {
-    chartRawRecords.value = []
-    chartTodaySummary.value = 0
-    chartMonthSummary.value = 0
+    barChartData.value = null
+    pieChartData.value = null
   }
   finally {
     chartLoading.value = false
@@ -155,43 +156,20 @@ watch([moduleFilter, dateRange, tablePageNo, tablePageSize], () => {
 
 const consumeTitle = computed(() => (chartScope.value === 'today' ? '今日消耗' : '本月消耗'))
 
-const chartTotalPoints = computed(() =>
-  chartScope.value === 'today' ? chartTodaySummary.value : chartMonthSummary.value,
-)
-
-const hourlyBuckets = computed(() => {
-  const buckets = Array.from({ length: 24 }, () => 0)
-  for (const r of chartRawRecords.value) {
-    const h = dayjs(r.consumedAt).hour()
-    buckets[h] += r.points
-  }
-  return buckets
-})
-
-const dailyBuckets = computed(() => {
-  const days = dayjs().daysInMonth()
-  const buckets = Array.from({ length: days }, () => 0)
-  for (const r of chartRawRecords.value) {
-    const d = dayjs(r.consumedAt).date()
-    if (d >= 1 && d <= days)
-      buckets[d - 1] += r.points
-  }
-  return buckets
-})
+const chartTotalPoints = computed(() => barChartData.value?.totalUsed ?? 0)
 
 const pieSlices = computed(() => {
-  const map = new Map<string, number>()
-  for (const r of chartRawRecords.value) {
-    const m = r.module || '其他'
-    map.set(m, (map.get(m) ?? 0) + r.points)
-  }
-  const entries = [...map.entries()].sort((a, b) => b[1] - a[1])
-  return entries.map(([name, value], i) => ({
-    name,
-    value,
+  const items = pieChartData.value?.items ?? []
+  return items.map((it, i) => ({
+    name: it.module,
+    value: it.usedPoints,
     itemStyle: { color: PIE_COLORS[i % PIE_COLORS.length] },
   }))
 })
+
+const pieDistributionTitle = computed(() =>
+  chartScope.value === 'today' ? '今日消耗分布' : '本月消耗分布',
+)
 
 /** 柱状默认浅蓝；hover 为品牌紫（与设计稿一致） */
 const BAR_COLOR_DEFAULT = 'rgba(114, 111, 255, 0.2)'
@@ -237,9 +215,11 @@ const barChartOption = computed<EChartsCoreOption>(() => {
     silent: false,
   }
 
+  const items = barChartData.value?.items ?? []
+
   if (chartScope.value === 'today') {
-    const values = hourlyBuckets.value
-    const categories = values.map((_, i) => `${i}:00`)
+    const values = items.map(i => i.usedPoints)
+    const categories = items.map(i => i.label)
     const data = buildBarSeriesData(values)
     return {
       grid: { left: 2, right: 2, top: 4, bottom: 18, containLabel: false },
@@ -255,8 +235,8 @@ const barChartOption = computed<EChartsCoreOption>(() => {
           lineHeight: 16,
           interval: 0,
           formatter: (val: string) => {
-            const h = Number.parseInt(val.replace(':00', ''), 10)
-            return [0, 6, 12, 18].includes(h) ? val : ''
+            const h = Number.parseInt(String(val).split(':')[0] ?? '0', 10)
+            return Number.isFinite(h) && [0, 6, 12, 18].includes(h) ? val : ''
           },
         },
       },
@@ -278,9 +258,15 @@ const barChartOption = computed<EChartsCoreOption>(() => {
           if (p == null || typeof p.dataIndex !== 'number')
             return ''
           const idx = p.dataIndex
-          const v = hourlyBuckets.value[idx] ?? 0
-          const next = (idx + 1) % 24
-          const range = `${idx}:00-${next}:00`
+          const v = values[idx] ?? 0
+          const cur = items[idx]
+          const next = items[idx + 1]
+          const range
+            = cur && next
+              ? `${cur.label}-${next.label}`
+              : cur
+                ? `${cur.label}-24:00`
+                : ''
           return formatBarTooltipHtml(range, v)
         },
       },
@@ -288,9 +274,13 @@ const barChartOption = computed<EChartsCoreOption>(() => {
     }
   }
 
-  const monthVals = dailyBuckets.value
-  const categories = monthVals.map((_, i) => `${i + 1}日`)
+  const monthVals = items.map(i => i.usedPoints)
+  const categories = items.map((it) => {
+    const d = dayjs(it.label)
+    return d.isValid() ? `${d.date()}日` : it.label
+  })
   const data = buildBarSeriesData(monthVals)
+  const n = monthVals.length
   return {
     grid: { left: 2, right: 2, top: 4, bottom: 18, containLabel: false },
     xAxis: {
@@ -305,7 +295,7 @@ const barChartOption = computed<EChartsCoreOption>(() => {
         interval: 0,
         formatter: (_value: string, index: number) => {
           const day = index + 1
-          if (day === 1 || day === 15 || day === monthVals.length || day % 5 === 0)
+          if (day === 1 || day === 15 || day === n || (n > 0 && day % 5 === 0))
             return `${day}日`
           return ''
         },
@@ -329,7 +319,8 @@ const barChartOption = computed<EChartsCoreOption>(() => {
           return ''
         const idx = p.dataIndex
         const v = monthVals[idx] ?? 0
-        return formatBarTooltipHtml(categories[idx] ?? '', v)
+        const rawLabel = items[idx]?.label ?? ''
+        return formatBarTooltipHtml(rawLabel, v)
       },
     },
     series: [{ ...barSeriesCommon, data }],
@@ -597,7 +588,7 @@ const columns = computed<ColumnsType<ConsumeRow>>(() => [
         <span
           class="shrink-0 px-6 pt-6 text-sm font-normal leading-[22px] text-[rgba(0,0,0,0.65)] dark:text-[rgba(255,255,255,0.65)]"
         >
-          本月消耗分布
+          {{ pieDistributionTitle }}
         </span>
         <div class="consume-pie-chart-zone min-h-0 min-w-0 flex-1">
           <div class="box-border h-full w-full p-2">
