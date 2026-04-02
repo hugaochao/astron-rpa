@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { message } from 'ant-design-vue'
+import { AlipayCircleFilled } from '@ant-design/icons-vue'
+import { message, Modal } from 'ant-design-vue'
 import { computed, onMounted, ref } from 'vue'
 
 import type { PointsBalance } from '@/api/points'
@@ -27,6 +28,20 @@ const balanceLoading = ref(false)
 const packageOptions = ref<RechargePackageOption[]>([])
 const productsLoading = ref(false)
 const rechargeLoading = ref(false)
+
+const rechargeQrOpen = ref(false)
+const rechargeQrUrl = ref('')
+
+function isChargeQrUrl(pay: unknown): pay is string {
+  return typeof pay === 'string' && /^https?:\/\//i.test(pay.trim())
+}
+
+function onRechargeQrClose() {
+  rechargeQrOpen.value = false
+  rechargeQrUrl.value = ''
+  message.warning('充值失败')
+  void loadBalance()
+}
 
 const POINTS_PER_YUAN = POINTS_PER_CNY
 const CUSTOM_POINTS_MIN = 100
@@ -219,14 +234,16 @@ async function handleRecharge() {
     const res = await postPaymentRecharge({
       prodId: pkg.prodId,
       versionId: pkg.versionId,
-      channel: 'ALIPAY',
+      channel: 'alipay_qr',
       ...(custom != null ? { customPoints: custom } : {}),
     })
     const pay = res?.charge
-    if (pay && /^https?:\/\//i.test(String(pay)))
-      window.open(String(pay), '_blank', 'noopener,noreferrer')
-    else
-      message.success('订单已创建')
+    if (isChargeQrUrl(pay)) {
+      rechargeQrUrl.value = pay.trim()
+      rechargeQrOpen.value = true
+      return
+    }
+    message.success('订单已创建')
     await loadBalance()
   }
   finally {
@@ -433,4 +450,40 @@ async function handleRecharge() {
       </div>
     </div>
   </div>
+
+  <Modal
+    :open="rechargeQrOpen"
+    :width="360"
+    :z-index="1200"
+    :footer="null"
+    centered
+    destroy-on-close
+    wrap-class-name="points-recharge-qr-modal-wrap"
+    class="points-recharge-qr-modal"
+    @cancel="onRechargeQrClose"
+  >
+    <template #title>
+      <div class="inline-flex items-center gap-2">
+        <AlipayCircleFilled class="text-[22px] text-[#1677FF]" />
+        <span class="text-base font-semibold text-[rgba(0,0,0,0.85)] dark:text-[rgba(255,255,255,0.85)]">
+          支付宝扫码支付
+        </span>
+      </div>
+    </template>
+    <div class="flex flex-col items-center px-2 pb-2 pt-1">
+      <div
+        class="flex h-[220px] w-[220px] items-center justify-center overflow-hidden rounded-lg border border-solid border-[rgba(0,0,0,0.06)] bg-white dark:border-[rgba(255,255,255,0.12)] dark:bg-[#1a1a1a]"
+      >
+        <img
+          v-if="rechargeQrUrl"
+          :src="rechargeQrUrl"
+          alt="支付宝收款二维码"
+          class="max-h-full max-w-full object-contain"
+        >
+      </div>
+      <p class="mt-4 text-center text-sm leading-[22px] !text-[rgba(0,0,0,0.45)] dark:!text-[rgba(255,255,255,0.45)]">
+        请使用支付宝扫描上方二维码完成支付
+      </p>
+    </div>
+  </Modal>
 </template>
