@@ -1,10 +1,16 @@
 <script setup lang="ts">
 import { AlipayCircleFilled } from '@ant-design/icons-vue'
 import { message, Modal } from 'ant-design-vue'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 import type { PointsBalance } from '@/api/points'
-import { getPaymentProducts, getPointsBalance, POINTS_PER_CNY, postPaymentRecharge } from '@/api/points'
+import {
+  getPaymentOrderStatus,
+  getPaymentProducts,
+  getPointsBalance,
+  POINTS_PER_CNY,
+  postPaymentRecharge,
+} from '@/api/points'
 
 /** 充值档位：来自 getPaymentProducts 的 products，price 为积分数量 */
 interface RechargePackageOption {
@@ -31,14 +37,87 @@ const rechargeLoading = ref(false)
 
 const rechargeQrOpen = ref(false)
 const rechargeQrUrl = ref('')
+/** 当前扫码支付订单号，用于轮询 GET /payment/order/status */
+const rechargeBizorderno = ref('')
+const paymentPollTimer = ref<ReturnType<typeof setTimeout> | null>(null)
+
+/** 轮询间隔 5s，总时长超过则超时（3 分钟） */
+const PAYMENT_POLL_INTERVAL_MS = 5000
+const PAYMENT_POLL_TIMEOUT_MS = 3 * 60 * 1000
+
+function stopPaymentStatusPolling() {
+  if (paymentPollTimer.value != null) {
+    clearTimeout(paymentPollTimer.value)
+    paymentPollTimer.value = null
+  }
+}
+
+/**
+ * 打开二维码后开始轮询订单支付状态；PAID 则关闭弹窗并刷新余额；
+ * 满 3 分钟未成功则提示超时并停止；订单不存在（404000）则停止。
+ */
+function startPaymentStatusPolling() {
+  stopPaymentStatusPolling()
+  const biz = rechargeBizorderno.value.trim()
+  if (!biz) {
+    message.warning('未获取到订单号，无法自动确认支付结果')
+    return
+  }
+  const startedAt = Date.now()
+
+  const scheduleNext = () => {
+    paymentPollTimer.value = setTimeout(() => {
+      void pollOnce()
+    }, PAYMENT_POLL_INTERVAL_MS)
+  }
+
+  const pollOnce = async () => {
+    if (!rechargeQrOpen.value) {
+      stopPaymentStatusPolling()
+      return
+    }
+    if (Date.now() - startedAt > PAYMENT_POLL_TIMEOUT_MS) {
+      stopPaymentStatusPolling()
+      message.warning('等待支付结果超时，请稍后在订单管理中确认，或重新发起充值')
+      return
+    }
+    try {
+      const data = await getPaymentOrderStatus(biz)
+      if (data?.paymentStatus === 'PAID') {
+        stopPaymentStatusPolling()
+        rechargeQrOpen.value = false
+        rechargeQrUrl.value = ''
+        rechargeBizorderno.value = ''
+        message.success('支付成功')
+        await loadBalance()
+        return
+      }
+    }
+    catch (e: unknown) {
+      const code = typeof e === 'object' && e !== null && 'code' in e
+        ? String((e as { code?: string }).code)
+        : ''
+      if (code === '404000') {
+        stopPaymentStatusPolling()
+        message.warning('订单不存在或已失效')
+        return
+      }
+    }
+    scheduleNext()
+  }
+
+  void pollOnce()
+}
 
 function isChargeQrUrl(pay: unknown): pay is string {
   return typeof pay === 'string' && /^https?:\/\//i.test(pay.trim())
 }
 
 function onRechargeQrClose() {
+  stopPaymentStatusPolling()
   rechargeQrOpen.value = false
   rechargeQrUrl.value = ''
+  rechargeBizorderno.value = ''
   message.warning('充值失败')
   void loadBalance()
 }
@@ -218,6 +297,10 @@ onMounted(async () => {
   await loadPaymentProducts()
 })
 
+onUnmounted(() => {
+  stopPaymentStatusPolling()
+})
+
 async function handleRecharge() {
   const pkg = selectedPackage.value
   if (!pkg) {
@@ -240,7 +323,9 @@ async function handleRecharge() {
     const pay = res?.charge
     if (isChargeQrUrl(pay)) {
       rechargeQrUrl.value = pay.trim()
+      rechargeBizorderno.value = String(res?.bizorderno ?? '').trim()
       rechargeQrOpen.value = true
+      startPaymentStatusPolling()
       return
     }
     message.success('订单已创建')
@@ -490,6 +575,9 @@ async function handleRecharge() {
       </div>
       <p class="mt-4 text-center text-sm leading-[22px] !text-[rgba(0,0,0,0.45)] dark:!text-[rgba(255,255,255,0.45)]">
         请使用支付宝扫描上方二维码完成支付
+      </p>
+      <p class="mt-1 text-center text-xs leading-5 !text-[rgba(0,0,0,0.35)] dark:!text-[rgba(255,255,255,0.35)]">
+        支付成功后将自动关闭本窗口并更新余额（最长等待约 3 分钟）
       </p>
     </div>
   </Modal>

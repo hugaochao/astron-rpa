@@ -7,7 +7,7 @@ import { useResizeObserver } from '@vueuse/core'
 import { computed, h, nextTick, onMounted, ref, watch } from 'vue'
 
 import type { PaymentOrderRecord } from '@/api/points'
-import { getPaymentOrders } from '@/api/points'
+import { getPaymentOrders, POINTS_PER_CNY } from '@/api/points'
 
 import InvoiceApplyModal from '../InvoiceApplyModal.vue'
 
@@ -16,9 +16,14 @@ type OrderActionType = 'apply' | 'invoicing' | 'applied' | 'applied_proxy'
 interface OrderRow {
   key: string
   orderId: string
+  subject: string
+  channel: string
   amountYuan: number
   points: number
-  purchasedAt: string
+  createdAt: string
+  paidAt: string
+  /** 后端 paymentStatus 原始值，用于中文与颜色映射 */
+  paymentStatusRaw: string
   action: OrderActionType
 }
 
@@ -33,18 +38,130 @@ function mapInvoiceToAction(inv: string): OrderActionType {
   return 'apply'
 }
 
+const CHANNEL_LABELS: Record<string, string> = {
+  alipay_qr: '支付宝扫码',
+  alipay: '支付宝',
+  wechat: '微信',
+  wechat_native: '微信扫码',
+}
+
+function formatChannel(raw: string): string {
+  const s = raw.trim()
+  if (!s)
+    return '—'
+  return CHANNEL_LABELS[s] ?? s
+}
+
+/** 后端 paymentStatus → 中文文案 + 文字颜色（含 dark） */
+function getPaymentStatusDisplay(raw: string): { label: string; className: string } {
+  const k = raw.trim().toUpperCase()
+  if (!k) {
+    return {
+      label: '—',
+      className:
+        'text-sm font-normal leading-[22.4px] text-[rgba(0,0,0,0.45)] dark:text-[rgba(255,255,255,0.45)]',
+    }
+  }
+
+  const map: Record<string, { label: string; className: string }> = {
+    PAID: {
+      label: '已支付',
+      className:
+        'text-sm font-medium leading-[22.4px] text-[#52c41a] dark:text-[#73d13d]',
+    },
+    PENDING: {
+      label: '待支付',
+      className:
+        'text-sm font-normal leading-[22.4px] text-[#fa8c16] dark:text-[#ffa940]',
+    },
+    UNPAID: {
+      label: '未支付',
+      className:
+        'text-sm font-normal leading-[22.4px] text-[#fa8c16] dark:text-[#ffa940]',
+    },
+    WAIT_PAY: {
+      label: '待支付',
+      className:
+        'text-sm font-normal leading-[22.4px] text-[#fa8c16] dark:text-[#ffa940]',
+    },
+    WAIT_BUYER_PAY: {
+      label: '等待买家付款',
+      className:
+        'text-sm font-normal leading-[22.4px] text-[#fa8c16] dark:text-[#ffa940]',
+    },
+    EXPIRED: {
+      label: '已过期',
+      className:
+        'text-sm font-normal leading-[22.4px] text-[rgba(0,0,0,0.45)] dark:text-[rgba(255,255,255,0.45)]',
+    },
+    FAILED: {
+      label: '支付失败',
+      className:
+        'text-sm font-medium leading-[22.4px] text-[#ff4d4f] dark:text-[#ff7875]',
+    },
+    CLOSED: {
+      label: '已关闭',
+      className:
+        'text-sm font-normal leading-[22.4px] text-[rgba(0,0,0,0.45)] dark:text-[rgba(255,255,255,0.45)]',
+    },
+    REFUNDED: {
+      label: '已退款',
+      className:
+        'text-sm font-medium leading-[22.4px] text-[#722ed1] dark:text-[#9254de]',
+    },
+    PARTIAL_REFUNDED: {
+      label: '部分退款',
+      className:
+        'text-sm font-normal leading-[22.4px] text-[#9254de] dark:text-[#b37feb]',
+    },
+    CANCELLED: {
+      label: '已取消',
+      className:
+        'text-sm font-normal leading-[22.4px] text-[rgba(0,0,0,0.45)] dark:text-[rgba(255,255,255,0.45)]',
+    },
+    CANCELED: {
+      label: '已取消',
+      className:
+        'text-sm font-normal leading-[22.4px] text-[rgba(0,0,0,0.45)] dark:text-[rgba(255,255,255,0.45)]',
+    },
+  }
+
+  const hit = map[k]
+  if (hit)
+    return hit
+
+  return {
+    label: raw,
+    className:
+      'text-sm font-normal leading-[22.4px] text-[rgba(0,0,0,0.65)] dark:text-[rgba(255,255,255,0.65)]',
+  }
+}
+
 function mapOrderRecord(r: PaymentOrderRecord, index: number): OrderRow {
   const biz = String(r.bizorderno ?? r.orderNo ?? `order-${index}`)
-  const amount = Number(r.amount ?? r.payAmount ?? r.totalAmount ?? 0)
-  const pts = Number(r.points ?? r.payPoints ?? 0)
-  const purchasedAt = String(r.payTime ?? r.gmtCreate ?? r.createTime ?? '')
+  const pts = Number(r.pointsAmount ?? r.points ?? r.payPoints ?? 0)
+  /** 后端 realAmount 为积分个数，与 pointsAmount 同单位；100 积分 = 1 元 */
+  const rawCash = r.realAmount != null ? Number(r.realAmount) : pts
+  const cashPoints = Number.isFinite(rawCash) ? rawCash : pts
+  const amountYuan = cashPoints / POINTS_PER_CNY
+  const createdAt = String(
+    r.createdAt ?? r.gmtCreate ?? r.createTime ?? r.payTime ?? '',
+  )
+  const paidAt = String(r.paidAt ?? '')
+  const subject = String(r.subject ?? '').trim() || '—'
+  const channel = formatChannel(String(r.channel ?? ''))
+  const paymentStatusRaw = String(r.paymentStatus ?? '').trim()
   const inv = String(r.invoiceStatus ?? r.invoiceApplyStatus ?? '')
   return {
     key: biz,
     orderId: biz,
-    amountYuan: amount,
+    subject,
+    channel,
+    amountYuan,
     points: pts,
-    purchasedAt,
+    createdAt: createdAt || '—',
+    paidAt: paidAt || '—',
+    paymentStatusRaw,
     action: mapInvoiceToAction(inv),
   }
 }
@@ -151,45 +268,83 @@ function renderActionCell(record: OrderRow) {
   )
 }
 
+function renderPaymentStatusCell(raw: string) {
+  const { label, className } = getPaymentStatusDisplay(raw)
+  return h('span', { class: className }, label)
+}
+
 const columns = computed<ColumnsType<OrderRow>>(() => [
   {
-    title: '订单编号',
+    title: '订单号',
     dataIndex: 'orderId',
     key: 'orderId',
+    width: 200,
     ellipsis: true,
   },
   {
-    title: '交易金额',
+    title: '商品',
+    dataIndex: 'subject',
+    key: 'subject',
+    width: 160,
+    ellipsis: true,
+  },
+  {
+    title: '支付渠道',
+    dataIndex: 'channel',
+    key: 'channel',
+    width: 112,
+    ellipsis: true,
+  },
+  {
+    title: '实付金额',
     dataIndex: 'amountYuan',
     key: 'amount',
+    width: 104,
     customRender: ({ record }) =>
       h(
         'span',
-        { class: 'text-[13px] font-normal leading-[20.8px] text-[rgba(0,0,0,0.65)]' },
+        { class: 'text-[13px] font-normal leading-[20.8px] text-[rgba(0,0,0,0.65)] dark:text-[rgba(255,255,255,0.65)]' },
         formatAmount(record.amountYuan),
       ),
   },
   {
-    title: '到账积分',
+    title: '积分',
     dataIndex: 'points',
     key: 'points',
+    width: 88,
     customRender: ({ text }) =>
       h(
         'span',
-        { class: 'text-sm font-normal leading-[22.4px] text-[rgba(0,0,0,0.65)]' },
+        { class: 'text-sm font-normal leading-[22.4px] text-[rgba(0,0,0,0.65)] dark:text-[rgba(255,255,255,0.65)]' },
         Number(text).toLocaleString(),
       ),
   },
   {
-    title: '购买时间',
-    dataIndex: 'purchasedAt',
-    key: 'purchasedAt',
+    title: '下单时间',
+    dataIndex: 'createdAt',
+    key: 'createdAt',
+    width: 168,
     ellipsis: true,
+  },
+  {
+    title: '支付时间',
+    dataIndex: 'paidAt',
+    key: 'paidAt',
+    width: 168,
+    ellipsis: true,
+  },
+  {
+    title: '支付状态',
+    dataIndex: 'paymentStatusRaw',
+    key: 'paymentStatusRaw',
+    width: 120,
+    customRender: ({ record }) => renderPaymentStatusCell(record.paymentStatusRaw),
   },
   {
     title: '操作',
     key: 'action',
-    width: 140,
+    width: 120,
+    fixed: 'right' as const,
     customRender: ({ record }) => renderActionCell(record),
   },
 ])
@@ -220,15 +375,17 @@ onMounted(() => {
   void nextTick(() => measureOrderTableBodyScroll())
 })
 
+const ORDER_TABLE_MIN_WIDTH = 1344
+
 const orderTableScroll = computed(() => {
   const n = orders.value.length
-  if (n === 0)
-    return undefined
   const maxY = orderTableBodyScrollY.value
   const contentH = n * ORDER_TABLE_ROW_PX
-  if (contentH <= maxY)
-    return undefined
-  return { y: maxY } as const
+  const needY = n > 0 && contentH > maxY
+  return {
+    x: ORDER_TABLE_MIN_WIDTH,
+    ...(needY ? { y: maxY } : {}),
+  } as const
 })
 
 </script>

@@ -180,6 +180,16 @@ export interface PaymentOrdersParams {
 export interface PaymentOrderRecord {
   bizorderno?: string
   orderNo?: string
+  /** 支付渠道，如 alipay_qr */
+  channel?: string
+  subject?: string
+  createdAt?: string
+  paidAt?: string
+  paymentStatus?: string
+  /** 到账积分个数 */
+  pointsAmount?: number
+  /** 与积分同单位（积分个数），非人民币元；展示金额时需 ÷ POINTS_PER_CNY */
+  realAmount?: number
   amount?: number
   payAmount?: number
   totalAmount?: number
@@ -216,12 +226,47 @@ export async function postPaymentRefund(data: PaymentRefundBody) {
   return res.data
 }
 
-// --- 4.8 开票申请 POST /points/orders/{bizorderno}/invoice ---
+// --- 4.8 订单状态查询 GET /payment/order/status（轮询支付结果）---
+
+export type PaymentOrderPaymentStatus = 'PAID' | 'PENDING' | string
+
+export interface PaymentOrderStatusData {
+  bizorderno: string
+  paymentStatus: PaymentOrderPaymentStatus
+  realAmount: number
+  pointsAmount: number
+  subject: string
+  channel: string
+  paidAt: string | null
+  createdAt: string
+}
+
+export async function getPaymentOrderStatus(
+  bizorderno: string,
+  config?: RequestConfig<PaymentOrderStatusData>,
+) {
+  const res = await http.get<PaymentOrderStatusData>(
+    `${P}/payment/order/status`,
+    { bizorderno },
+    { toast: false, ...config },
+  )
+  return res.data
+}
+
+// --- 开票申请 POST /points/orders/{bizorderno}/invoice ---
+
+/** 发票类型（与交易/开票服务约定一致） */
+export enum InvoiceType {
+  /** 增值税普通发票 */
+  GENERAL = 'GENERAL',
+  /** 增值税专用发票 */
+  VAT_SPECIAL = 'VAT_SPECIAL',
+}
 
 export interface PointsOrderInvoiceBody {
   invoiceTitle: string
   taxNumber: string
-  invoiceType: string
+  invoiceType: InvoiceType
   email: string
 }
 

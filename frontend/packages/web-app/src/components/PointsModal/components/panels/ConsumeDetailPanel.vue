@@ -56,6 +56,61 @@ const MODULE_OPTIONS = [
   { value: '验证码识别', label: '验证码识别' },
 ] as const
 
+/** 与筛选项一致的中文名；已是中文则不再翻译 */
+const KNOWN_CN_MODULES = new Set(
+  MODULE_OPTIONS.filter(o => o.value !== 'all').map(o => o.label),
+)
+
+/** 后端 module 枚举（英文/下划线等）→ 中文展示，与 MODULE_OPTIONS 对齐 */
+const MODULE_CODE_TO_CN: Record<string, string> = {
+  AI: 'AI大模型',
+  LLM: 'AI大模型',
+  AI_LLM: 'AI大模型',
+  AI_MODEL: 'AI大模型',
+  LARGE_LANGUAGE_MODEL: 'AI大模型',
+  SMART_COMPONENT: '智能组件',
+  SMART_COMP: '智能组件',
+  INTELLIGENT_COMPONENT: '智能组件',
+  OCR: 'OCR识别',
+  OCR_RECOGNITION: 'OCR识别',
+  ASR: '语音识别',
+  SPEECH: '语音识别',
+  SPEECH_RECOGNITION: '语音识别',
+  VOICE: '语音识别',
+  VOICE_RECOGNITION: '语音识别',
+  CAPTCHA: '验证码识别',
+  CAPTCHA_RECOGNITION: '验证码识别',
+  VERIFICATION: '验证码识别',
+  VERIFICATION_CODE: '验证码识别',
+}
+
+function normalizeModuleCode(raw: string): string {
+  return raw
+    .trim()
+    .replace(/([a-z])([A-Z])/g, '$1_$2')
+    .replace(/[\s-]+/g, '_')
+    .toUpperCase()
+}
+
+/** 消耗明细 / 饼图：module 字段展示为中文 */
+function formatConsumptionModule(raw: string): string {
+  const s = raw.trim()
+  if (!s)
+    return '—'
+  if (KNOWN_CN_MODULES.has(s))
+    return s
+
+  const code = normalizeModuleCode(s)
+  if (MODULE_CODE_TO_CN[code])
+    return MODULE_CODE_TO_CN[code]
+
+  const upper = s.toUpperCase()
+  if (MODULE_CODE_TO_CN[upper])
+    return MODULE_CODE_TO_CN[upper]
+
+  return s
+}
+
 const MODULE_FILTER_PREFIX = '消耗模块：'
 
 /** 收起时 Select 用完整 label；下拉项用 #option 只展示短名 */
@@ -161,7 +216,7 @@ const chartTotalPoints = computed(() => barChartData.value?.totalUsed ?? 0)
 const pieSlices = computed(() => {
   const items = pieChartData.value?.items ?? []
   return items.map((it, i) => ({
-    name: it.module,
+    name: formatConsumptionModule(it.module),
     value: it.usedPoints,
     itemStyle: { color: PIE_COLORS[i % PIE_COLORS.length] },
   }))
@@ -473,7 +528,14 @@ const columns = computed<ColumnsType<ConsumeRow>>(() => [
     key: 'module',
     ellipsis: true,
     customRender: ({ text }) =>
-      h('span', { class: 'text-[13px] leading-[20.8px] text-[rgba(0,0,0,0.65)]' }, String(text)),
+      h(
+        'span',
+        {
+          class:
+            'text-[13px] leading-[20.8px] text-[rgba(0,0,0,0.65)] dark:text-[rgba(255,255,255,0.65)]',
+        },
+        formatConsumptionModule(String(text ?? '')),
+      ),
   },
   {
     title: '服务商',

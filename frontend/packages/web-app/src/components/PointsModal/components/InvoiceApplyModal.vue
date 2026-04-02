@@ -2,7 +2,7 @@
 import { message, Modal } from 'ant-design-vue'
 import { reactive, ref, watch } from 'vue'
 
-import { postPointsOrderInvoice } from '@/api/points'
+import { InvoiceType, postPointsOrderInvoice } from '@/api/points'
 
 defineOptions({ name: 'InvoiceApplyModal' })
 
@@ -19,11 +19,14 @@ const emit = defineEmits<{
 const form = reactive({
   invoiceTitle: '',
   taxId: '',
-  invoiceType: '普通发票',
+  invoiceType: InvoiceType.GENERAL,
   email: '',
 })
 
-const invoiceTypeOptions = [{ value: '普通发票', label: '普通发票' }]
+const invoiceTypeOptions = [
+  { value: InvoiceType.GENERAL, label: '增值税普通发票' },
+  { value: InvoiceType.VAT_SPECIAL, label: '增值税专用发票' },
+]
 
 const emailRules = [
   { required: true, message: '请输入接受邮箱', trigger: 'blur' },
@@ -44,7 +47,7 @@ watch(
       return
     form.invoiceTitle = ''
     form.taxId = ''
-    form.invoiceType = '普通发票'
+    form.invoiceType = InvoiceType.GENERAL
     form.email = ''
   },
 )
