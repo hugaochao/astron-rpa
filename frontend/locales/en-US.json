@@ -1615,7 +1615,8 @@
   "useDirection": "Directions for use",
   "userInfo": {
     "userName": "User Name",
-    "userRight": "Rights Information"
+    "userRight": "Rights Information",
+    "pointsManage": "Points management"
   },
   "userManual": "User Manual",
   "validateElement": "Validate element",

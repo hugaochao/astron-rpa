@@ -901,7 +901,8 @@
   },
   "userInfo": {
     "userName": "用户名称",
-    "userRight": "权益信息"
+    "userRight": "权益信息",
+    "pointsManage": "积分管理"
   },
   "settingCenter": {
     "appearance": "外观",

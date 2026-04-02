@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ConsultUpgradeTrigger } from '@rpa/components/auth'
+import { NiceModal } from '@rpa/components'
 import { Button, Checkbox, Dropdown } from 'ant-design-vue'
 import { useTranslation } from 'i18next-vue'
 import { storeToRefs } from 'pinia'
@@ -8,6 +9,7 @@ import { computed, h, inject } from 'vue'
 import { getTermianlStatus, startSchedulingMode } from '@/api/engine'
 import { taskNotify } from '@/api/task'
 import GlobalModal from '@/components/GlobalModal/index.ts'
+import { PointsModal } from '@/components/PointsModal'
 import { utilsManager, windowManager } from '@/platform'
 import { useAppConfigStore } from '@/stores/useAppConfig'
 import { useAppModeStore } from '@/stores/useAppModeStore'
@@ -38,6 +40,11 @@ const menuData = computed(() => {
       hidden: () => userStore.currentTenant?.tenantType === 'personal',
     },
     {
+      key: 'pointsManage',
+      icon: 'ai',
+      label: t('userInfo.pointsManage'),
+    },
+    {
       key: 'logout',
       icon: 'logout',
       label: t('logout'),
@@ -46,6 +53,12 @@ const menuData = computed(() => {
 })
 
 async function menuClick(item: any) {
+  if (item.key === 'pointsManage') {
+    NiceModal.show(PointsModal, {
+      workspaceName: userStore.currentTenant?.name,
+    })
+    return
+  }
   const { data: { running } } = await getTermianlStatus()
   if (running) {
     modalTip()
