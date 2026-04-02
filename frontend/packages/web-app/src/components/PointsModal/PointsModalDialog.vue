@@ -78,7 +78,6 @@ function handleClose() {
 /* 弹窗定高 980×680，wrap 上下留白；充值底栏在 PointsManagePanel 内贴内容区底全宽 */
 .points-modal-wrap.ant-modal-wrap {
   align-items: center;
-  padding: 5vh 24px;
 }
 
 .points-modal-wrap .ant-modal {
