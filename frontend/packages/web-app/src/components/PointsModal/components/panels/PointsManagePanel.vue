@@ -257,7 +257,7 @@ async function handleRecharge() {
     class="flex min-h-0 min-w-0 flex-1 flex-col self-stretch overflow-hidden"
   >
     <div
-      class="flex min-h-0 min-w-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-contain"
+      class="flex min-h-0 min-w-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-contain px-6 pb-6"
     >
     <div class="text-[15px] leading-[25.5px] !text-[rgba(0,0,0,0.65)] dark:!text-[rgba(255,255,255,0.65)]">
       <span>充值后可使用星辰RPA平台提供的AI智能、OCR、验证码等扩展服务。</span>
@@ -411,47 +411,50 @@ async function handleRecharge() {
     </div>
     </div>
 
+    <!-- 贴弹窗内容区最底、全宽，不受上方 px-6 影响；顶部分割线 -->
     <div
-      class="box-border flex h-[88px] min-h-[88px] shrink-0 items-center justify-between gap-4 self-stretch border-t border-solid border-[rgba(0,0,0,0.06)] bg-white px-6 dark:border-[rgba(255,255,255,0.08)] dark:bg-[#141414]"
+      class="points-manage-footer-bar box-border flex h-[88px] w-full shrink-0 flex-col justify-center border-t border-solid border-[rgba(0,0,0,0.06)] bg-white dark:border-[rgba(255,255,255,0.08)] dark:bg-[#141414]"
     >
-      <div class="inline-flex min-w-0 flex-1 flex-col items-start justify-center gap-1">
-        <div>
-          <span
-            class="font-sans text-2xl font-semibold !text-[rgba(0,0,0,0.85)] dark:!text-[rgba(255,255,255,0.85)]"
-          >
-            {{ formattedRechargeCash }}
-          </span>
+      <div class="flex h-full min-h-0 items-center justify-between gap-4 px-6">
+        <div class="inline-flex min-w-0 flex-1 flex-col items-start justify-center gap-1">
+          <div>
+            <span
+              class="font-sans text-2xl font-semibold !text-[rgba(0,0,0,0.85)] dark:!text-[rgba(255,255,255,0.85)]"
+            >
+              {{ formattedRechargeCash }}
+            </span>
+          </div>
+          <div class="text-center">
+            <span
+              class="text-xs font-normal !text-[rgba(0,0,0,0.65)] dark:!text-[rgba(255,255,255,0.65)]"
+            >
+              充值即表示您同意《
+            </span>
+            <button
+              type="button"
+              class="border-0 bg-transparent p-0 text-xs font-normal text-[#726FFF] underline"
+            >
+              星辰RPA积分充值购买协议
+            </button>
+            <span
+              class="text-xs font-normal !text-[rgba(0,0,0,0.65)] dark:!text-[rgba(255,255,255,0.65)]"
+            >
+              》
+            </span>
+          </div>
         </div>
-        <div class="text-center">
-          <span
-            class="text-xs font-normal !text-[rgba(0,0,0,0.65)] dark:!text-[rgba(255,255,255,0.65)]"
-          >
-            充值即表示您同意《
+        <button
+          type="button"
+          class="flex h-[46px] w-[140px] shrink-0 items-center justify-center rounded-[10px] border-0 bg-[#726FFF] px-8 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          :disabled="!canRecharge || rechargeLoading || productsLoading"
+          :aria-busy="rechargeLoading"
+          @click="handleRecharge"
+        >
+          <span class="text-center text-[15px] font-semibold text-white">
+            {{ rechargeLoading ? '提交中…' : '立即充值' }}
           </span>
-          <button
-            type="button"
-            class="border-0 bg-transparent p-0 text-xs font-normal text-[#726FFF] underline"
-          >
-            星辰RPA积分充值购买协议
-          </button>
-          <span
-            class="text-xs font-normal !text-[rgba(0,0,0,0.65)] dark:!text-[rgba(255,255,255,0.65)]"
-          >
-            》
-          </span>
-        </div>
+        </button>
       </div>
-      <button
-        type="button"
-        class="flex h-[46px] w-[140px] shrink-0 items-center justify-center rounded-[10px] border-0 bg-[#726FFF] px-8 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-        :disabled="!canRecharge || rechargeLoading || productsLoading"
-        :aria-busy="rechargeLoading"
-        @click="handleRecharge"
-      >
-        <span class="text-center text-[15px] font-semibold text-white">
-          {{ rechargeLoading ? '提交中…' : '立即充值' }}
-        </span>
-      </button>
     </div>
   </div>
 

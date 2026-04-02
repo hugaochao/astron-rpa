@@ -43,23 +43,39 @@ function handleClose() {
     class="points-modal"
   >
     <div
-      class="points-modal-inner flex min-h-0 w-full min-w-0 flex-1 flex-col gap-6 overflow-hidden bg-white dark:bg-[#141414]"
+      class="points-modal-inner flex h-full min-h-0 w-full min-w-0 flex-1 flex-col gap-6 overflow-hidden bg-white dark:bg-[#141414]"
     >
-      <PointsModalHeader v-model:active-tab="activeTab" class="shrink-0" @close="handleClose" />
+      <div class="shrink-0 px-6 pt-6">
+        <PointsModalHeader v-model:active-tab="activeTab" @close="handleClose" />
+      </div>
 
-      <PointsManagePanel
+      <div
         v-if="activeTab === 'manage'"
-        class="min-h-0 flex-1"
-        :workspace-name="displayWorkspaceName"
-      />
-      <ConsumeDetailPanel v-else-if="activeTab === 'consume'" class="min-h-0 flex-1" />
-      <OrderManagePanel v-else class="min-h-0 flex-1" />
+        class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+      >
+        <PointsManagePanel
+          class="min-h-0 flex-1"
+          :workspace-name="displayWorkspaceName"
+        />
+      </div>
+      <div
+        v-else-if="activeTab === 'consume'"
+        class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-6 pb-6"
+      >
+        <ConsumeDetailPanel class="min-h-0 flex-1" />
+      </div>
+      <div
+        v-else
+        class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-6 pb-6"
+      >
+        <OrderManagePanel class="min-h-0 flex-1" />
+      </div>
     </div>
   </a-modal>
 </template>
 
 <style lang="scss">
-/* 弹窗最大 980×740，wrap 上下留白；表格等在各自卡片内滚动 */
+/* 弹窗定高 980×680，wrap 上下留白；充值底栏在 PointsManagePanel 内贴内容区底全宽 */
 .points-modal-wrap.ant-modal-wrap {
   align-items: center;
   padding: 5vh 24px;
@@ -67,16 +83,20 @@ function handleClose() {
 
 .points-modal-wrap .ant-modal {
   top: 0 !important;
+  width: 980px !important;
   max-width: 980px;
-  max-height: 740px;
+  height: 680px;
+  max-height: 680px;
   margin: 0 auto;
   padding-bottom: 0;
 }
 
 .points-modal-wrap .ant-modal-content {
   display: flex;
-  max-height: 740px;
+  height: 680px;
+  max-height: 680px;
   flex-direction: column;
+  padding: 0 !important;
   overflow: hidden;
 }
 
@@ -92,5 +112,6 @@ function handleClose() {
 .points-modal-inner {
   box-sizing: border-box;
   min-height: 0;
+  height: 100%;
 }
 </style>
