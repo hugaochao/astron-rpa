@@ -254,8 +254,11 @@ async function handleRecharge() {
 
 <template>
   <div
-    class="flex min-h-0 min-w-0 flex-1 flex-col gap-6 self-stretch overflow-y-auto overscroll-contain"
+    class="flex min-h-0 min-w-0 flex-1 flex-col self-stretch overflow-hidden"
   >
+    <div
+      class="flex min-h-0 min-w-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-contain"
+    >
     <div class="text-[15px] leading-[25.5px] !text-[rgba(0,0,0,0.65)] dark:!text-[rgba(255,255,255,0.65)]">
       <span>充值后可使用星辰RPA平台提供的AI智能、OCR、验证码等扩展服务。</span>
       <button
@@ -404,50 +407,51 @@ async function handleRecharge() {
             积分
           </span>
         </div> -->
+      </div>
+    </div>
+    </div>
 
-        <div
-          class="inline-flex min-h-[88px] items-center justify-between gap-4 self-stretch rounded-2xl border border-solid bg-white px-6 py-4 !border-[rgba(0,0,0,0.10)] dark:bg-[#1a1a1a] dark:!border-[rgba(255,255,255,0.14)]"
-        >
-          <div class="inline-flex min-w-0 flex-1 flex-col items-start justify-start gap-1">
-            <div>
-              <span
-                class="font-sans text-2xl font-semibold !text-[rgba(0,0,0,0.85)] dark:!text-[rgba(255,255,255,0.85)]"
-              >
-                {{ formattedRechargeCash }}
-              </span>
-            </div>
-            <div class="text-center">
-              <span
-                class="text-xs font-normal !text-[rgba(0,0,0,0.65)] dark:!text-[rgba(255,255,255,0.65)]"
-              >
-                充值即表示您同意《
-              </span>
-              <button
-                type="button"
-                class="border-0 bg-transparent p-0 text-xs font-normal text-[#726FFF] underline"
-              >
-                星辰RPA积分充值购买协议
-              </button>
-              <span
-                class="text-xs font-normal !text-[rgba(0,0,0,0.65)] dark:!text-[rgba(255,255,255,0.65)]"
-              >
-                》
-              </span>
-            </div>
-          </div>
+    <div
+      class="box-border flex h-[88px] min-h-[88px] shrink-0 items-center justify-between gap-4 self-stretch border-t border-solid border-[rgba(0,0,0,0.06)] bg-white px-6 dark:border-[rgba(255,255,255,0.08)] dark:bg-[#141414]"
+    >
+      <div class="inline-flex min-w-0 flex-1 flex-col items-start justify-center gap-1">
+        <div>
+          <span
+            class="font-sans text-2xl font-semibold !text-[rgba(0,0,0,0.85)] dark:!text-[rgba(255,255,255,0.85)]"
+          >
+            {{ formattedRechargeCash }}
+          </span>
+        </div>
+        <div class="text-center">
+          <span
+            class="text-xs font-normal !text-[rgba(0,0,0,0.65)] dark:!text-[rgba(255,255,255,0.65)]"
+          >
+            充值即表示您同意《
+          </span>
           <button
             type="button"
-            class="flex h-[46px] w-[140px] shrink-0 items-center justify-center rounded-[10px] border-0 bg-[#726FFF] px-8 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-            :disabled="!canRecharge || rechargeLoading || productsLoading"
-            :aria-busy="rechargeLoading"
-            @click="handleRecharge"
+            class="border-0 bg-transparent p-0 text-xs font-normal text-[#726FFF] underline"
           >
-            <span class="text-center text-[15px] font-semibold text-white">
-              {{ rechargeLoading ? '提交中…' : '立即充值' }}
-            </span>
+            星辰RPA积分充值购买协议
           </button>
+          <span
+            class="text-xs font-normal !text-[rgba(0,0,0,0.65)] dark:!text-[rgba(255,255,255,0.65)]"
+          >
+            》
+          </span>
         </div>
       </div>
+      <button
+        type="button"
+        class="flex h-[46px] w-[140px] shrink-0 items-center justify-center rounded-[10px] border-0 bg-[#726FFF] px-8 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+        :disabled="!canRecharge || rechargeLoading || productsLoading"
+        :aria-busy="rechargeLoading"
+        @click="handleRecharge"
+      >
+        <span class="text-center text-[15px] font-semibold text-white">
+          {{ rechargeLoading ? '提交中…' : '立即充值' }}
+        </span>
+      </button>
     </div>
   </div>
 

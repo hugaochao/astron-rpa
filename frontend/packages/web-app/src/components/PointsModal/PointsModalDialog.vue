@@ -33,7 +33,7 @@ function handleClose() {
 <template>
   <a-modal
     v-bind="NiceModal.antdModal(modal)"
-    :width="1080"
+    :width="980"
     :footer="null"
     :closable="false"
     :z-index="1100"
@@ -43,22 +43,23 @@ function handleClose() {
     class="points-modal"
   >
     <div
-      class="points-modal-inner flex max-h-full min-h-0 w-full flex-1 flex-col gap-6 overflow-hidden bg-white dark:bg-[#141414]"
+      class="points-modal-inner flex min-h-0 w-full min-w-0 flex-1 flex-col gap-6 overflow-hidden bg-white dark:bg-[#141414]"
     >
       <PointsModalHeader v-model:active-tab="activeTab" class="shrink-0" @close="handleClose" />
 
       <PointsManagePanel
         v-if="activeTab === 'manage'"
+        class="min-h-0 flex-1"
         :workspace-name="displayWorkspaceName"
       />
-      <ConsumeDetailPanel v-else-if="activeTab === 'consume'" />
-      <OrderManagePanel v-else />
+      <ConsumeDetailPanel v-else-if="activeTab === 'consume'" class="min-h-0 flex-1" />
+      <OrderManagePanel v-else class="min-h-0 flex-1" />
     </div>
   </a-modal>
 </template>
 
 <style lang="scss">
-/* 弹窗整体最高 90vh，wrap 上下各留 5vh；各 Tab 面板内部自行 overflow-y-auto */
+/* 弹窗最大 980×740，wrap 上下留白；表格等在各自卡片内滚动 */
 .points-modal-wrap.ant-modal-wrap {
   align-items: center;
   padding: 5vh 24px;
@@ -66,14 +67,15 @@ function handleClose() {
 
 .points-modal-wrap .ant-modal {
   top: 0 !important;
-  max-height: 90vh;
+  max-width: 980px;
+  max-height: 740px;
   margin: 0 auto;
   padding-bottom: 0;
 }
 
 .points-modal-wrap .ant-modal-content {
   display: flex;
-  max-height: 90vh;
+  max-height: 740px;
   flex-direction: column;
   overflow: hidden;
 }

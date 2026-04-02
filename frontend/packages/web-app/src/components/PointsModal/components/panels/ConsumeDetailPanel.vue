@@ -514,7 +514,7 @@ const columns = computed<ColumnsType<ConsumeRow>>(() => [
 
 <template>
   <div
-    class="flex min-h-0 min-w-0 flex-1 flex-col gap-4 self-stretch overflow-y-auto overscroll-contain"
+    class="flex min-h-0 min-w-0 flex-1 flex-col gap-4 self-stretch overflow-hidden"
   >
     <!-- 上图表行：允许饼图 hover 略超出，不被祖先裁切 -->
     <div class="flex shrink-0 gap-4 self-stretch overflow-visible">
@@ -602,9 +602,9 @@ const columns = computed<ColumnsType<ConsumeRow>>(() => [
       </div>
     </div>
 
-    <!-- 消耗明细：整块卡片固定高度 412px，表格外框占满剩余区域 -->
+    <!-- 消耗明细：外框撑满剩余高度，表格在框内滚动 -->
     <div
-      class="consume-detail-section flex min-w-0 flex-col gap-4 self-stretch overflow-hidden rounded-2xl border border-solid border-[rgba(0,0,0,0.10)] bg-white px-6 pb-6 pt-6 dark:border-[rgba(255,255,255,0.14)] dark:bg-[#1a1a1a]"
+      class="consume-detail-section flex min-h-0 min-w-0 flex-1 flex-col gap-4 self-stretch overflow-hidden rounded-2xl border border-solid border-[rgba(0,0,0,0.10)] bg-white px-6 pb-6 pt-6 dark:border-[rgba(255,255,255,0.14)] dark:bg-[#1a1a1a]"
     >
       <div class="flex shrink-0 items-start justify-between gap-4 self-stretch">
         <span class="text-base font-semibold leading-[25.6px] text-[rgba(0,0,0,0.85)] dark:text-[rgba(255,255,255,0.85)]">
@@ -737,10 +737,8 @@ const columns = computed<ColumnsType<ConsumeRow>>(() => [
 
 .consume-detail-section {
   box-sizing: border-box;
-  height: 412px;
-  min-height: 412px;
-  max-height: 412px;
-  flex-shrink: 0;
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 .consume-detail-table-wrap {

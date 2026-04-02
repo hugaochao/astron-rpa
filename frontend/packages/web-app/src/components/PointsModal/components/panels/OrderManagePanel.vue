@@ -3,7 +3,8 @@ import { CalendarOutlined } from '@ant-design/icons-vue'
 import type { Dayjs } from 'dayjs'
 import type { ColumnsType } from 'ant-design-vue/es/table'
 import { Table } from 'ant-design-vue'
-import { computed, h, ref, watch } from 'vue'
+import { useResizeObserver } from '@vueuse/core'
+import { computed, h, nextTick, onMounted, ref, watch } from 'vue'
 
 import type { PaymentOrderRecord } from '@/api/points'
 import { getPaymentOrders } from '@/api/points'
@@ -193,11 +194,48 @@ const columns = computed<ColumnsType<OrderRow>>(() => [
   },
 ])
 
+const ORDER_TABLE_ROW_PX = 48
+
+const orderTableFrameRef = ref<HTMLElement | null>(null)
+const orderTableBodyScrollY = ref(360)
+
+function measureOrderTableBodyScroll() {
+  const root = orderTableFrameRef.value
+  if (!root)
+    return
+  const thead = root.querySelector('.ant-table-thead')
+  const headH = thead instanceof HTMLElement ? thead.offsetHeight : 46
+  orderTableBodyScrollY.value = Math.max(80, Math.floor(root.clientHeight - headH))
+}
+
+useResizeObserver(orderTableFrameRef, () => {
+  void nextTick(() => measureOrderTableBodyScroll())
+})
+
+watch([orders, orderLoading], () => {
+  void nextTick(() => measureOrderTableBodyScroll())
+})
+
+onMounted(() => {
+  void nextTick(() => measureOrderTableBodyScroll())
+})
+
+const orderTableScroll = computed(() => {
+  const n = orders.value.length
+  if (n === 0)
+    return undefined
+  const maxY = orderTableBodyScrollY.value
+  const contentH = n * ORDER_TABLE_ROW_PX
+  if (contentH <= maxY)
+    return undefined
+  return { y: maxY } as const
+})
+
 </script>
 
 <template>
   <div
-    class="flex min-h-0 min-w-0 flex-1 flex-col gap-4 self-stretch overflow-y-auto overscroll-contain"
+    class="flex min-h-0 min-w-0 flex-1 flex-col gap-4 self-stretch overflow-hidden"
   >
     <!-- 说明 -->
     <div
@@ -208,9 +246,9 @@ const columns = computed<ColumnsType<OrderRow>>(() => [
       </p>
     </div>
 
-    <!-- 充值订单：卡片最小高度 412px -->
+    <!-- 充值订单：外框撑满剩余高度，表格在框内滚动 -->
     <div
-      class="order-manage-section flex min-w-0 flex-col gap-4 self-stretch overflow-hidden rounded-2xl border border-solid border-[rgba(0,0,0,0.10)] bg-white px-6 pb-6 pt-6 dark:border-[rgba(255,255,255,0.14)] dark:bg-[#1a1a1a]"
+      class="order-manage-section flex min-h-0 min-w-0 flex-1 flex-col gap-4 self-stretch overflow-hidden rounded-2xl border border-solid border-[rgba(0,0,0,0.10)] bg-white px-6 pb-6 pt-6 dark:border-[rgba(255,255,255,0.14)] dark:bg-[#1a1a1a]"
     >
       <div class="flex shrink-0 items-start justify-between gap-4 self-stretch">
         <span
@@ -232,13 +270,17 @@ const columns = computed<ColumnsType<OrderRow>>(() => [
         </a-range-picker>
       </div>
 
-      <div class="order-table-wrap w-full min-w-0">
-        <a-spin :spinning="orderLoading" class="w-full">
+      <div
+        ref="orderTableFrameRef"
+        class="order-table-frame order-table-wrap box-border min-h-0 w-full min-w-0 flex-1 overflow-hidden"
+      >
+        <a-spin :spinning="orderLoading" class="h-full min-h-0 w-full [&_.ant-spin-container]:h-full">
           <Table
             row-key="key"
             :columns="columns"
             :data-source="orders"
             :pagination="false"
+            :scroll="orderTableScroll"
             size="small"
             class="order-manage-table"
           />
@@ -285,7 +327,8 @@ const columns = computed<ColumnsType<OrderRow>>(() => [
 
 .order-manage-section {
   box-sizing: border-box;
-  min-height: 412px;
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 .order-table-wrap {
@@ -293,9 +336,23 @@ const columns = computed<ColumnsType<OrderRow>>(() => [
   flex-direction: column;
 }
 
+.order-table-frame {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
 .order-manage-table {
+  flex: 1;
+  min-height: 0;
+
   &:deep(.ant-table) {
     background: transparent;
+  }
+
+  &:deep(.ant-spin-nested-loading),
+  &:deep(.ant-spin-container),
+  &:deep(.ant-table-wrapper) {
+    height: 100%;
   }
 
   &:deep(.ant-table-container) {
