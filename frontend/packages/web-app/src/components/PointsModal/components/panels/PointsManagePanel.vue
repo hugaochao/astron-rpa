@@ -375,13 +375,13 @@ async function handleRecharge() {
               >
                 空间总额 {{ spaceTotal.toLocaleString() }}
               </span>
-              <div
+              <!-- <div
                 class="flex h-[22px] items-center justify-center gap-2.5 rounded-md bg-[rgba(215,215,255,0.40)] px-2.5 py-0.5 dark:bg-[rgba(215,215,255,0.15)]"
               >
                 <span class="text-xs font-semibold leading-[18px] text-[#726FFF]">
                   配额{{ quotaPercent }}%
                 </span>
-              </div>
+              </div> -->
             </div>
           </div>
           <div class="inline-flex w-full items-end justify-start gap-2.5 self-stretch">
