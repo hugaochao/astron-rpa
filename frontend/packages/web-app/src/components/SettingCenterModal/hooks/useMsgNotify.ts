@@ -37,7 +37,7 @@ export function useNotify() {
   const email: Ref<RPA.EmailFormMap> = ref(initEmailData())
   const emailFormRules: Record<string, Rule[]> = {
     receiver: [
-      { required: true, message: t('userForm.enterEmail'), trigger: 'blur' },
+      { required: true, trigger: 'change' },
       {
         pattern: /\w[-\w.+]*@([A-Z0-9][-A-Z0-9]+\.)+[A-Z]{2,14}/i,
         message: t('settingCenter.msgNotify.mailFormatError'),
@@ -61,7 +61,7 @@ export function useNotify() {
   const phoneFormRules: Record<string, Rule[]> = {
     receiver: [
       // /0?(13|14|15|18)[0-9]{9}/
-      { required: true, message: t('userForm.enterPhone'), trigger: 'blur' },
+      { required: true, trigger: 'change' },
       {
         pattern: /^1([3-9])\d{9}$/,
         message: t('settingCenter.msgNotify.phoneFormatError'),
@@ -70,17 +70,13 @@ export function useNotify() {
     ],
   }
 
-  function handleMsgTest(key: string) {
-    console.log('handleMsgTest', key)
-    handleValidateSave().then(() => {
-      toolsInterfacePost({
-        alert_type: key,
-      }).then((res) => {
-        message.success(res.msg || t('settingCenter.msgNotify.testSuccess'))
-      })
-      message.info(t('settingCenter.msgNotify.testSent', { type: key === 'mail' ? t('userForm.email') : t('userForm.phone') }))
-    })
+  async function handleMsgTest(key: string) {
+    await handleValidateSave()
+    await toolsInterfacePost({ alert_type: key })
+    const type = key === 'mail' ? t('settingCenter.msgNotify.email') : t('settingCenter.msgNotify.sms')
+    message.info(t('settingCenter.msgNotify.testSent', { type }))
   }
+
   function errorSave() {
     let newSetting
     if (email.value.is_enable) {
@@ -101,22 +97,17 @@ export function useNotify() {
     }
     useUserSettingStore().saveUserSetting(newSetting)
   }
-  function handleValidateSave() {
-    return new Promise((resolve, reject) => {
-      const currRef = email.value.is_enable ? emailRef : phoneRef
-      currRef.value.validate().then(() => {
-        const newSetting = {
-          msgNotifyForm: {
-            email: email.value,
-            phone_msg: phone_msg.value,
-          },
-        }
-        useUserSettingStore().saveUserSetting(newSetting)
-        resolve({})
-      }).catch(() => {
-        reject(new Error(t('common.validationFailed')))
-      })
-    })
+
+  async function handleValidateSave() {
+    const currRef = email.value.is_enable ? emailRef : phoneRef
+    await currRef.value.validate()
+    const newSetting = {
+      msgNotifyForm: {
+        email: email.value,
+        phone_msg: phone_msg.value,
+      },
+    }
+    useUserSettingStore().saveUserSetting(newSetting)
   }
 
   function initData() {
@@ -132,7 +123,7 @@ export function useNotify() {
   initData()
 
   onBeforeUnmount(() => {
-    handleValidateSave().catch(() => { errorSave() })
+    handleValidateSave().catch(() => errorSave())
   })
   return {
     emailRef,
@@ -141,7 +132,6 @@ export function useNotify() {
     phoneRef,
     phone_msg,
     phoneFormRules,
-    handleValidateSave,
     handleMsgTest,
   }
 }

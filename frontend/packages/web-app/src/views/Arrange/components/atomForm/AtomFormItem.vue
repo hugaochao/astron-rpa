@@ -11,7 +11,11 @@ import {
   useFormItemRequired,
 } from './hooks/useFormItemSort'
 
-const { atomFormItem } = defineProps<{ atomFormItem: RPA.AtomDisplayItem }>()
+const { atomFormItem } = defineProps<{
+  atomFormItem: RPA.AtomDisplayItem
+  disabled?: boolean
+  hideRequiredTip?: boolean // 是否隐藏必填提示
+}>()
 
 // 是否展示 label
 const showLabel = computed(() => {
@@ -35,7 +39,12 @@ const showLabel = computed(() => {
       <span v-if="atomFormItem.subTitle" class="text-[10px] leading-4">
         {{ atomFormItem.subTitle }}
       </span>
-      <a-tooltip v-if="atomFormItem.tip" :title="atomFormItem.tip">
+      <a-tooltip v-if="atomFormItem.tip">
+        <template #title>
+          <slot name="tooltip-title" :atom-form-item="atomFormItem">
+            {{ atomFormItem.tip }}
+          </slot>
+        </template>
         <rpa-hint-icon name="atom-form-tip" width="16px" height="16px" />
       </a-tooltip>
       <span
@@ -46,9 +55,13 @@ const showLabel = computed(() => {
         {{ $t('common.createPythonScript') }}
       </span>
     </label>
-    <AtomConfig :form-item="atomFormItem" class="mt-2" />
+    <AtomConfig
+      :form-item="atomFormItem"
+      class="mt-2 relative"
+      :class="{ 'pointer-events-none after:pointer-events-auto after:absolute after:inset-0 cursor-not-allowed': disabled }"
+    />
     <article
-      v-if="useFormItemRequired(atomFormItem)"
+      v-if="!hideRequiredTip && useFormItemRequired(atomFormItem)"
       class="form-container-context-required"
     >
       {{ $t('common.fieldIsRequired', { field: atomFormItem.title }) }}

@@ -8,51 +8,44 @@ import type { AuthType } from '../../../interface'
 import ConsultModal from './ConsultModal.vue'
 import ConsultUpgradeTrigger from './ConsultUpgradeTrigger.vue'
 
-const props = defineProps({
+type TriggerType = 'button' | 'modal'
+
+interface ButtonConf {
+  buttonType: 'tag' | 'text' | 'button'
+  buttonTxt?: string
+  currentEdition?: 'personal' | 'professional' | 'enterprise'
+  expirationDate?: string
+  shouldAlert?: boolean
+}
+
+interface ModalConfirmConf {
+  title: string
+  content: string
+  okText: string
+  cancelText: string
+}
+
+interface ConsultConf {
+  consultTitle?: string
+  consultEdition?: 'professional' | 'enterprise'
+  consultType: 'consult' | 'renewal'
+}
+
+interface Props {
   /** 仅挂载咨询弹窗，由外部通过 ref.openModal() 打开（与触发器 UI 解耦） */
-  modalOnly: {
-    type: Boolean,
-    default: false,
-  },
-  authType: {
-    type: String as () => AuthType,
-    default: 'uap',
-  },
-  trigger: {
-    type: String as () => 'button' | 'modal',
-    default: 'button',
-  },
-  buttonConf: {
-    type: Object as () => {
-      buttonType: 'tag' | 'text' | 'button'
-      buttonTxt?: string
-      currentEdition?: 'personal' | 'professional' | 'enterprise'
-      expirationDate?: string
-      shouldAlert?: boolean
-    } | undefined,
-    default: undefined,
-  },
-  customClass: {
-    type: String,
-    default: undefined,
-  },
-  modalConfirm: {
-    type: Object as () => {
-      title: string
-      content: string
-      okText: string
-      cancelText: string
-    } | undefined,
-    default: undefined,
-  },
-  consult: {
-    type: Object as () => {
-      consultTitle?: string
-      consultEdition?: 'professional' | 'enterprise'
-      consultType: 'consult' | 'renewal'
-    } | undefined,
-    default: undefined,
-  },
+  modalOnly?: boolean
+  authType?: AuthType
+  trigger?: TriggerType
+  buttonConf?: ButtonConf
+  customClass?: string
+  modalConfirm?: ModalConfirmConf
+  consult?: ConsultConf
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  modalOnly: false,
+  authType: 'uap',
+  trigger: 'button',
 })
 
 const confData = ref(props)
@@ -65,20 +58,20 @@ watch(
   },
   { deep: true },
 )
+
 const consultModalRef = ref<InstanceType<typeof ConsultModal> | null>(null)
+
 function openModal() {
   if (confData.value.authType !== 'casdoor')
     consultModalRef.value?.showModal()
 }
 
-function init(config: Omit<typeof props, 'modalOnly'>) {
-  confData.value = { modalOnly: false, ...config } as typeof props
+function init(config: Omit<Props, 'modalOnly'>) {
+  confData.value = { modalOnly: false, ...config }
   if (confData.value.trigger === 'modal') {
     Modal.confirm({
       ...confData.value.modalConfirm!,
-      onOk() {
-        openModal()
-      },
+      onOk: () => openModal(),
     })
   }
 }
@@ -105,7 +98,7 @@ defineExpose({
       <Button v-else type="primary" ghost block class="border !border-[#0000001A] dark:!border-[#FFFFFF29]" @click="openModal">
         <span class="!flex items-center justify-center text-[12px] text-[#000000D9] dark:text-[#FFFFFFD9]">
           <RpaIcon class="w-[16px] h-[16px] mr-[4px]" name="python-package-plus" />
-          <span>{{ confData?.buttonConf?.buttonTxt || '创建新的空间' }}</span>
+          <span>{{ confData?.buttonConf?.buttonTxt || $t('components.auth.createWorkspace') }}</span>
         </span>
       </Button>
     </template>

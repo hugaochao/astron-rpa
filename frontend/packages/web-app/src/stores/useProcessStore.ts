@@ -66,6 +66,8 @@ export const useProcessStore = defineStore('process', () => {
   const parameters = ref<RPA.ConfigParamData[]>([])
   // 组件属性列表
   const attributes = ref<RPA.ComponentAttrData[]>([])
+  // 组件 comment（编辑区便捷描述）
+  const componentComment = ref('')
   // 原子能力 tree 列表
   const atomicTreeData = computed<RPA.AtomTreeNode[]>(
     () => atomMeta.state.value.atomicTree || [],
@@ -75,7 +77,7 @@ export const useProcessStore = defineStore('process', () => {
   // 扩展组件 tree 列表
   const extendTree = useAsyncState(getModuleMeta, [], { immediate: false })
   // 自定义组件 tree 列表
-  const componentTree = useAsyncState(() => getComponentList({ robotId: project.value.id }), [], { immediate: false })
+  const componentTree = useAsyncState(() => getComponentList({ robotId: project.value.id, robotVersion: project.value.version }), [], { immediate: false })
   // 全局变量模板列表
   const globalVarTypeList = computed<Record<string, RPA.VariableValueType>>(
     () => atomMeta.state.value?.types || {},
@@ -118,7 +120,7 @@ export const useProcessStore = defineStore('process', () => {
 
   // 生成唯一的配置参数名称
   const generateParameterName = () => {
-    const baseName = 'p_variable'
+    const baseName = isComponent.value ? 'c_variable' : 'p_variable'
     let count = 0
     let variableName = baseName
 
@@ -341,6 +343,7 @@ export const useProcessStore = defineStore('process', () => {
     pyCodeText.value = await getProcessPyCode({
       moduleId: resourceId,
       robotId: project.value.id,
+      robotVersion: project.value.version,
     })
     activeProcess.value.isLoading = false
   }
@@ -443,6 +446,7 @@ export const useProcessStore = defineStore('process', () => {
     globalVarTypeOption,
     parameters,
     attributes,
+    componentComment,
     commonAdvancedParameter,
     atomicTreeDataFlat,
     atomicTreeData,

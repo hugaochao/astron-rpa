@@ -20,7 +20,8 @@ from astronverse.cua.action_parser import (
     parse_action_to_structure_output,
     parsing_response_to_pyautogui_code,
 )
-from astronverse.cua.custom_action_screen import CustomActionScreen
+from astronverse.cua.custom_action_screen import DEFAULT_CUA_MODEL, CustomActionScreen
+from astronverse.cua.error import BizException, UNKNOWN_RESPONSE_FORMAT
 from PIL import Image, ImageDraw
 
 # 电脑 GUI 任务场景的提示词模板
@@ -54,6 +55,23 @@ finished(content='xxx') # Use escape characters \\', \\", and \\n in content par
 API_URL = "http://127.0.0.1:{}/api/rpa-ai-service/cua/chat".format(
     atomicMg.cfg().get("GATEWAY_PORT") if atomicMg.cfg().get("GATEWAY_PORT") else "13159"
 )
+CUA_DEBUG_PREFIX = "CUA_DEBUG::"
+CUA_DEBUG_CONFIG_PATH = Path.cwd() / ".cua_debug_config.json"
+CUA_DEBUG_STREAM_PATH = Path.cwd() / ".cua_debug_stream.jsonl"
+
+
+def resolve_debug_stream_path() -> Path:
+    try:
+        if CUA_DEBUG_CONFIG_PATH.exists():
+            config = json.loads(CUA_DEBUG_CONFIG_PATH.read_text(encoding="utf-8"))
+            stream_path = config.get("streamPath")
+            if stream_path:
+                return Path(stream_path)
+    except Exception:
+        pass
+
+    return CUA_DEBUG_STREAM_PATH
+
 
 
 class ComputerUseAgent:
@@ -63,17 +81,18 @@ class ComputerUseAgent:
         self,
         max_steps: int = 20,
         temperature: float = 0.0,
+        model: str = DEFAULT_CUA_MODEL,
     ):
         """
         初始化Agent
 
         Args:
             max_steps: 最大执行步数
-            temperature: 模型温度参数
         """
 
         self.max_steps = max_steps
         self.temperature = temperature
+        self.model = model.strip() if model and model.strip() else DEFAULT_CUA_MODEL
 
         # 设置截图目录
         self.screenshot_dir = Path(tempfile.mkdtemp(prefix="cua_agent_"))
@@ -103,6 +122,24 @@ class ComputerUseAgent:
         self.consecutive_same_action = 1  # 连续相同action的次数
 
         logger.info(f"[初始化] 截图保存目录: {self.screenshot_dir}")
+
+    def emit_debug_event(self, event: str, **payload) -> None:
+        debug_payload = {"event": event, **payload}
+        debug_payload = {key: value for key, value in debug_payload.items() if value not in (None, "", [], {})}
+        debug_message = f"{CUA_DEBUG_PREFIX}{json.dumps(debug_payload, ensure_ascii=False)}"
+        logger.info(debug_message)
+        print(debug_message, flush=True)
+
+    def emit_realtime_text_log(self, message: str) -> None:
+        print(f"[CUA_DEBUG] {message}", flush=True)
+
+    def append_debug_stream(self, event: str, **payload) -> None:
+        stream_payload = {"event": event, "timestamp": datetime.now().isoformat(), **payload}
+        stream_payload = {key: value for key, value in stream_payload.items() if value not in (None, "", [], {})}
+        stream_path = resolve_debug_stream_path()
+        stream_path.parent.mkdir(parents=True, exist_ok=True)
+        with stream_path.open("a", encoding="utf-8") as file:
+            file.write(json.dumps(stream_payload, ensure_ascii=False) + "\n")
 
     def take_screenshot(self) -> tuple[str, str]:
         """
@@ -301,7 +338,7 @@ class ComputerUseAgent:
 
         try:
             # 发送 API 请求
-            request_body = {"messages": messages}
+            request_body = {"messages": messages, "model": self.model}
             response = requests.post(API_URL, json=request_body)
             response.raise_for_status()  # 检查请求是否成功
 
@@ -400,6 +437,9 @@ class ComputerUseAgent:
         logger.info(f"{'=' * 60}")
         logger.info(f"[任务开始] {instruction}")
         logger.info(f"{'=' * 60}\n")
+        self.emit_debug_event("start", status="running", instruction=instruction, message="debug_started")
+        self.emit_realtime_text_log("Debug started")
+        self.append_debug_stream("start", instruction=instruction, status="running", message="Debug started")
 
         step = 0
         action_step = 0
@@ -452,6 +492,13 @@ class ComputerUseAgent:
                     response, 1000, image_height, image_width, model_type="doubao"
                 )
                 if not action:
+                    self.emit_debug_event(
+                        "status",
+                        step=step,
+                        status="waiting_action",
+                        screenshot=screenshot_path,
+                        message="waiting_for_valid_action",
+                    )
                     # 更新连续无action计数器
                     self.consecutive_no_action += 1
 
@@ -483,6 +530,16 @@ class ComputerUseAgent:
                         self.consecutive_same_action = 1
                         self.last_action = current_action_key
 
+                current_action = action[0] if isinstance(action, list) and action else {}
+                self.emit_debug_event(
+                    "step",
+                    step=step,
+                    status="running",
+                    thought=current_action.get("thought", ""),
+                    screenshot=screenshot_path,
+                    action_type=current_action.get("action_type", ""),
+                )
+
                 # 4. 执行动作
                 logger.info("执行动作...")
 
@@ -494,6 +551,9 @@ class ComputerUseAgent:
                     logger.info(f"总步骤数: {step}")
                     logger.info(f"总耗时: {time.time() - start_time:.2f}秒")
                     logger.info("=" * 60)
+                    self.emit_debug_event("finish", step=step, status="success", message="run_finished")
+                    self.emit_realtime_text_log("Run finished")
+                    self.append_debug_stream("finish", step=step, status="success", message="Run finished")
                     return {
                         "success": True,
                         "steps": step,
@@ -510,6 +570,9 @@ class ComputerUseAgent:
             logger.info(f"总步骤数: {step}")
             logger.info(f"总耗时: {time.time() - start_time:.2f}秒")
             logger.info("=" * 60)
+            self.emit_debug_event("finish", step=step, status="max_steps", message="max_steps_reached")
+            self.emit_realtime_text_log("Max steps reached")
+            self.append_debug_stream("finish", step=step, status="max_steps", message="Max steps reached")
             return {
                 "success": False,
                 "steps": step,
@@ -519,6 +582,9 @@ class ComputerUseAgent:
             }
         except KeyboardInterrupt:
             logger.info("\n\n[任务中断] 用户手动停止")
+            self.emit_debug_event("finish", step=step, status="manual_stop", message="debug_stopped")
+            self.emit_realtime_text_log("Debug stopped")
+            self.append_debug_stream("finish", step=step, status="manual_stop", message="Debug stopped")
             return {
                 "success": False,
                 "steps": step,
@@ -528,6 +594,9 @@ class ComputerUseAgent:
             }
         except Exception as e:
             logger.info(f"\n\n[任务失败] 发生错误: {e}")
+            self.emit_debug_event("error", step=step, status="error", error=str(e), message="run_failed")
+            self.emit_realtime_text_log(f"Run failed: {e}")
+            self.append_debug_stream("error", step=step, status="error", error=str(e), message=f"Run failed: {e}")
             return {
                 "success": False,
                 "steps": step,
@@ -551,6 +620,7 @@ class ComputerUse:
             atomicMg.param("instruction", types="Str"),
             atomicMg.param("max_steps", types="Int", required=False),
             atomicMg.param("temperature", types="Float", required=False),
+            atomicMg.param("model", types="Str", required=False, default=DEFAULT_CUA_MODEL),
         ],
         outputList=[
             atomicMg.param("computer_use_res", types="Dict"),
@@ -560,6 +630,7 @@ class ComputerUse:
         instruction: str,
         max_steps: int = 20,
         temperature: float = 0.0,
+        model: str = DEFAULT_CUA_MODEL,
     ):
         """
         运行计算机使用代理任务
@@ -567,7 +638,6 @@ class ComputerUse:
         Args:
             instruction: 用户指令
             max_steps: 最大执行步数
-            temperature: 模型温度参数
 
         Returns:
             执行结果，包含success, steps, action_steps, duration, screenshots, error等字段
@@ -576,6 +646,7 @@ class ComputerUse:
         agent = ComputerUseAgent(
             max_steps=max_steps,
             temperature=temperature,
+            model=model,
         )
         result = agent.run(instruction)
 
@@ -595,6 +666,7 @@ class ComputerUse:
             atomicMg.param("instruction", types="Str"),
             atomicMg.param("max_steps", types="Int", required=False),
             atomicMg.param("temperature", types="Float", required=False),
+            atomicMg.param("model", types="Str", required=False, default=DEFAULT_CUA_MODEL),
         ],
         outputList=[
             atomicMg.param("computer_use_res", types="Dict"),
@@ -604,6 +676,7 @@ class ComputerUse:
         instruction: str,
         max_steps: int = 20,
         temperature: float = 0.0,
+        model: str = DEFAULT_CUA_MODEL,
     ):
         """
         自定义AI操作屏幕
@@ -611,7 +684,6 @@ class ComputerUse:
         Args:
             instruction: 用户指令
             max_steps: 最大执行步数
-            temperature: 模型温度参数
 
         Returns:
             执行结果，包含success, steps, action_steps, duration, screenshots, error等字段
@@ -620,6 +692,7 @@ class ComputerUse:
         agent = CustomActionScreen(
             max_steps=max_steps,
             temperature=temperature,
+            model=model,
         )
         result = agent.run(instruction)
 
@@ -638,9 +711,35 @@ class ComputerUse:
     @atomicMg.atomic(
         "ComputerUse",
         inputList=[
+            atomicMg.param("instruction", types="Str", default="判断当前屏幕是否满足条件"),
+            atomicMg.param("max_steps", types="Int", required=False),
+        ],
+    )
+    def screen_condition(
+        instruction: str,
+        max_steps: int = 1,
+    ) -> bool:
+        """
+        IF屏幕满足条件 - 使用视觉大模型判断当前屏幕是否满足指定条件
+
+        Args:
+            instruction: 判断条件描述，如"判断谷歌浏览器是否在任务栏中"
+            max_steps: 最大执行步数，默认1（单次判断）
+
+        Returns:
+            True 表示条件满足执行流程内逻辑，False 表示不满足跳出该流程
+        """
+        agent = CustomActionScreen(max_steps=max_steps)
+        return agent.judge_screen_condition(instruction)
+
+    @staticmethod
+    @atomicMg.atomic(
+        "ComputerUse",
+        inputList=[
             atomicMg.param("instruction", types="Str", default="帮我从屏幕中提取数据，并返回 JSON 格式。"),
             atomicMg.param("max_steps", types="Int", required=False),
             atomicMg.param("temperature", types="Float", required=False),
+            atomicMg.param("model", types="Str", required=False, default=DEFAULT_CUA_MODEL),
         ],
         outputList=[
             atomicMg.param("computer_use_res", types="Dict"),
@@ -650,6 +749,7 @@ class ComputerUse:
         instruction: str,
         max_steps: int = 1,
         temperature: float = 0.0,
+        model: str = DEFAULT_CUA_MODEL,
     ):
         """
         提取屏幕数据
@@ -657,7 +757,6 @@ class ComputerUse:
         Args:
             instruction: 用户指令
             max_steps: 最大执行步数
-            temperature: 模型温度参数
 
         Returns:
             执行结果，包含success, steps, action_steps, duration, screenshots, error等字段
@@ -666,6 +765,7 @@ class ComputerUse:
         agent = CustomActionScreen(
             max_steps=max_steps,
             temperature=temperature,
+            model=model,
         )
         result = agent.run(instruction)
 
@@ -687,6 +787,7 @@ class ComputerUse:
             atomicMg.param("instruction", types="Str", default="帮我将 [数据内容] 填写到屏幕中的表单。数据内容："),
             atomicMg.param("max_steps", types="Int", required=False),
             atomicMg.param("temperature", types="Float", required=False),
+            atomicMg.param("model", types="Str", required=False, default=DEFAULT_CUA_MODEL),
         ],
         outputList=[
             atomicMg.param("computer_use_res", types="Dict"),
@@ -696,6 +797,7 @@ class ComputerUse:
         instruction: str,
         max_steps: int = 20,
         temperature: float = 0.0,
+        model: str = DEFAULT_CUA_MODEL,
     ):
         """
         填写表单
@@ -703,7 +805,6 @@ class ComputerUse:
         Args:
             instruction: 用户指令
             max_steps: 最大执行步数
-            temperature: 模型温度参数
 
         Returns:
             执行结果，包含success, steps, action_steps, duration, screenshots, error等字段
@@ -712,6 +813,7 @@ class ComputerUse:
         agent = CustomActionScreen(
             max_steps=max_steps,
             temperature=temperature,
+            model=model,
         )
         result = agent.run(instruction)
 
@@ -732,7 +834,6 @@ class ComputerUse:
         inputList=[
             atomicMg.param("instruction", types="Str", default="帮我处理并关闭屏幕中的验证码。"),
             atomicMg.param("max_steps", types="Int", required=False),
-            atomicMg.param("temperature", types="Float", required=False),
         ],
         outputList=[
             atomicMg.param("computer_use_res", types="Dict"),
@@ -741,7 +842,6 @@ class ComputerUse:
     def process_captcha(
         instruction: str,
         max_steps: int = 20,
-        temperature: float = 0.0,
     ):
         """
         处理验证码
@@ -749,16 +849,12 @@ class ComputerUse:
         Args:
             instruction: 用户指令
             max_steps: 最大执行步数
-            temperature: 模型温度参数
 
         Returns:
             执行结果，包含success, steps, action_steps, duration, screenshots, error等字段
         """
 
-        agent = CustomActionScreen(
-            max_steps=max_steps,
-            temperature=temperature,
-        )
+        agent = CustomActionScreen(max_steps=max_steps)
         result = agent.run(instruction)
 
         # 返回结果，确保所有输出参数都有值

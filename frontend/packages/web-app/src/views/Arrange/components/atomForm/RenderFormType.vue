@@ -7,7 +7,7 @@ import {
   SettingOutlined,
 } from '@ant-design/icons-vue'
 import { NiceModal } from '@rpa/components'
-import { debounce } from 'lodash-es'
+import { debounce, isEqual } from 'lodash-es'
 import type { Ref } from 'vue'
 import { computed, inject, ref, watch } from 'vue'
 
@@ -59,7 +59,6 @@ const emit = defineEmits(['update'])
 
 const { handleModalButton, handleTextareaModal, handleHTMLContentPaste } = useRenderFormType()
 const isShowFormItem = inject<Ref<boolean>>('showAtomFormItem', ref(true))
-const atomFormDisabled = inject<Ref<boolean>>('atomFormDisabled', ref(false)) // 自定义组件设置预览禁止输入
 const cursorStore = useCursorStore()
 const flowStore = useFlowStore()
 const container = ref(generateInputVal(itemData))
@@ -84,16 +83,21 @@ watch(
   },
 )
 
-watch(() => itemData.value, () => { // 特殊处理自定义对话框视图多个控件联动更新
-  const { formType: { type }, allowReverse } = itemData
-  if (type === ATOM_FORM_TYPE.SELECT && allowReverse) {
-    selectValue.value = generateInputVal(itemData)
+watch(() => itemData.value, () => {
+  const nextValue = generateInputVal(itemData)
+  const currentInputId = `rpa_input_${itemData.key}`
+  const isCurrentInputFocused = document.activeElement?.id === currentInputId
+
+  // 外部更新参数值时，同步输入框内容，避免显示滞后
+  // 输入框正在编辑时不重写 v-html，避免光标被重置到开头
+  if (itemType === ATOM_FORM_TYPE.INPUT && !isCurrentInputFocused && !isEqual(container.value, nextValue)) {
+    container.value = nextValue
   }
-})
+}, { immediate: true })
 
 function clickHandle(e?: Event) {
   // Python 模式在禁用状态下禁止切换
-  if (itemType === ATOM_FORM_TYPE.PYTHON && (!isEdit.value || atomFormDisabled.value)) {
+  if (itemType === ATOM_FORM_TYPE.PYTHON && !isEdit.value) {
     return
   }
   if (itemType === ATOM_FORM_TYPE.MODALBUTTON) {
@@ -165,7 +169,7 @@ inputListListener(itemData, itemType)
   <span
     v-if="itemType === ATOM_FORM_TYPE.PYTHON"
     class="cursor-pointer leading-none"
-    :class="{ '[&>*]:cursor-not-allowed': !isEdit || atomFormDisabled }"
+    :class="{ '[&>*]:cursor-not-allowed': !isEdit }"
     @click="clickHandle"
   >
     <rpa-hint-icon :title="itemData.isExpr ? $t('atomForm.pythonMode') : $t('atomForm.normalMode')" :name="itemData.isExpr ? 'create-python-process' : 'change-python-btn'" :style="iconStyle" />
@@ -174,8 +178,8 @@ inputListListener(itemData, itemType)
   <div
     v-if="itemType === ATOM_FORM_TYPE.INPUT"
     :id="`rpa_input_${itemData.key}`"
-    class="editor flex-1 min-h-5" :class="{ 'cursor-not-allowed': !isEdit || atomFormDisabled }"
-    :contenteditable="isEdit && !atomFormDisabled"
+    class="editor flex-1 min-h-5" :class="{ 'cursor-not-allowed': !isEdit }"
+    :contenteditable="isEdit"
     @input="(e) => handleInput(e, itemData)"
     @paste="(e) => handlePaste(e, itemData)"
     @blur="cursorStore.handleBlur"
@@ -278,10 +282,10 @@ inputListListener(itemData, itemType)
   <a-switch
     v-if="itemType === ATOM_FORM_TYPE.SWITCH"
     v-model:checked="selectValue"
-    :checked-value="itemData?.options[0].value"
-    :un-checked-value="itemData?.options[1].value"
-    :checked-children="itemData?.options[0].label"
-    :un-checked-children="itemData?.options[1].label"
+    :checked-value="itemData?.options?.[0]?.value"
+    :un-checked-value="itemData?.options?.[1]?.value"
+    :checked-children="itemData?.options?.[0]?.label"
+    :un-checked-children="itemData?.options?.[1]?.label"
   />
   <!-- 下拉框 -->
   <AtomSelect v-if="itemType === ATOM_FORM_TYPE.SELECT" v-model:value="selectValue" :render-data="itemData" />
